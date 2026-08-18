@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-test.txt
+      - run: python -m py_compile examples/build_synthetic_dataset.py
+      - run: pytest -q
+      - name: Validate component manifest
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path("COMPONENTS.json")
+          if not path.exists():
+              raise SystemExit("COMPONENTS.json is required")
+          data = json.loads(path.read_text())
+          assert data["schemaVersion"] == 1
+          for name in ("validator", "finetuner"):
+              item = data["components"][name]
+              assert item["repository"].startswith("kurtvalcorza/")
+              assert len(item["commit"]) == 40
+          PY
