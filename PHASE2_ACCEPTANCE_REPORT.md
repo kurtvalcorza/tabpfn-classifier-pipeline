@@ -4,11 +4,11 @@
 **Runtime host:** Windows 11 + WSL2 `nvidia-docker` distro, Docker 29.6.2
 **GPU:** RTX 5070 Ti Laptop, 12 GB VRAM, compute cap 12.0 (Blackwell / sm_120), driver 610.88
 **Stack:** `tabpfn==8.1.0`, `torch 2.11.0+cu128` (CUDA 12.8), base image `pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime`
-**Components under test (pinned in `COMPONENTS.json`):** validator `13c2ff0a`, finetuner `1a94cf4c`
+**Components:** validator `13c2ff0a` (unchanged); finetuner initial `1a94cf4c` → **`e93649a`** after the D1/D2 fixes were merged in finetuner PR #2. `COMPONENTS.json` pins `e93649a`.
 
 ## Verdict
 
-The CPU→GPU→artifact→clean-reload chain is **proven end-to-end for both `v2` and `v3`**. Two real, previously-unproven defects were found, fixed, and verified (now on PR [#2](https://github.com/kurtvalcorza/tabpfn-classifier-finetuner/pull/2)). `v3` (TabPFN-3, gated non-commercial) required accepting the license via the **HuggingFace gate** and a manual weight download (`DIMER_TABPFN_MODEL_PATH`), because the Prior Labs portal license-acceptance flow never registered against the API token's account (see §v3). DIMER serving (gate 8) is not yet exercised.
+The CPU→GPU→artifact→clean-reload chain is **proven end-to-end for both `v2` and `v3`**. Two real, previously-unproven defects (D1, D2) were found during the initial Phase 2 run, **fixed in finetuner PR [#2](https://github.com/kurtvalcorza/tabpfn-classifier-finetuner/pull/2) (merged at `e93649a`), and re-verified from the merged implementation** (image built from the merged repo; v2 + v3 fine-tune and round-trip with the stock entrypoint). `v3` (TabPFN-3, gated non-commercial) required accepting the license via the **HuggingFace gate** and a manual weight download (`DIMER_TABPFN_MODEL_PATH`), because the Prior Labs portal license-acceptance flow never registered against the API token's account (see §v3). DIMER serving (gate 8) is a separate deferred gate, not a blocker to closing Phase 2 GPU acceptance.
 
 ## Gate results (`DEPLOYMENT.md §2`)
 
@@ -16,7 +16,7 @@ The CPU→GPU→artifact→clean-reload chain is **proven end-to-end for both `v
 |---|------|--------|----------|
 | 1 | Validator CI | PASS (also re-run locally) | 18/18 checks green on synthetic ZIP |
 | 2 | Finetuner unit/config CI | PASS (per prior CI) | — |
-| 3 | **Finetuner CUDA image builds** | **FAIL as-is → PASS with 1-line fix** | bare `pip install` dies on PEP 668 in the 2.11 base |
+| 3 | **Finetuner CUDA image builds** | **FAIL initially → PASS (fixed in `e93649a`)** | bare `pip install` died on PEP 668 in the 2.11 base; D1 fix merged |
 | 4 | TabPFN checkpoint licensing reviewed | **RESOLVED (HF gate)** | v3 license accepted via HF gated repo; portal flow was broken (§v3) |
 | 5 | Approved model-distribution path | PASS | v2 auto-download (Apache); v3 manual HF download + `DIMER_TABPFN_MODEL_PATH` |
 | 6 | **Real GPU fine-tuning smoke test** | **PASS (v2 + v3)** | exit 0, artifacts written, metrics below |
@@ -46,21 +46,23 @@ Reloaded `model.tabpfn_fit` in a **fresh container** via `serving/load_artifact.
 
 This confirms the portable loader reconstructs the identical fitted estimator after relocation, on GPU and CPU.
 
-## Defects found (previously unproven; CI could not catch either)
+## Defects found and fixed (previously unproven; CI could not catch either)
 
-### D1 — Finetuner Docker image does not build (gate 3)
-`pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime` ships a **PEP 668 externally-managed** system Python, so `Dockerfile:12` `RUN pip install --no-cache-dir -r requirements.txt` fails with `error: externally-managed-environment`.
+Both were found during the initial Phase 2 run, **fixed in finetuner PR #2 (merged at `e93649a`), and re-verified from the merged implementation** — the image was rebuilt straight from the merged repo and v2 + v3 fine-tune and round-trip pass with the stock entrypoint (no local patches).
 
-**Proposed fix (finetuner `Dockerfile`):**
+### D1 — Finetuner Docker image did not build (gate 3)
+`pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime` ships a **PEP 668 externally-managed** system Python, so the original `Dockerfile` `RUN pip install --no-cache-dir -r requirements.txt` failed with `error: externally-managed-environment`.
+
+**Fix (merged, finetuner `Dockerfile`):**
 ```dockerfile
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 ```
-(equivalently `ENV PIP_BREAK_SYSTEM_PACKAGES=1`). Safe in a single-purpose container.
+Safe in a single-purpose container.
 
-### D2 — Fine-tuned artifact cannot be saved on GPU (blocks gates 6/7/8)
-TabPFN 8.1.0's `save_fitted_tabpfn_model` (`model_loading.py:1059-1061`) str-coerces `torch.dtype` **but no other non-JSON init param**, then `json.dump(params)`. The fine-tuned inference estimator's `get_params()` returns `device` (a **tuple**) and `model_path` (a **`ClassifierModelSpecs`**), so the save raises `TypeError: Object of type … is not JSON serializable` and **no artifact is written**.
+### D2 — Fine-tuned artifact could not be saved on GPU (blocked gates 6/7/8)
+TabPFN 8.1.0's `save_fitted_tabpfn_model` (`model_loading.py:1059-1061`) str-coerces `torch.dtype` **but no other non-JSON init param**, then `json.dump(params)`. The fine-tuned inference estimator's `get_params()` returns `device` (a **tuple**) and `model_path` (a **`ClassifierModelSpecs`**), so the save raised `TypeError: Object of type … is not JSON serializable` and **no artifact was written**.
 
-**Proposed fix (finetuner `train.py`, in `save_artifacts` immediately before `save_fitted_tabpfn_model`):**
+**Fix (merged, finetuner `train.py` `save_artifacts`, before `save_fitted_tabpfn_model`):**
 ```python
 # Work around TabPFN 8.1.0 save_fitted_tabpfn_model: it str-coerces torch.dtype
 # but not other non-JSON init params (device tuple, ClassifierModelSpecs).
@@ -70,7 +72,7 @@ for _k, _v in model.get_params(deep=False).items():
     except (TypeError, ValueError):
         setattr(model, _k, str(_v))
 ```
-Safe because evaluation runs before saving, the foundation weights are persisted separately via `save_tabpfn_model(model.ckpt)`, and `serving/load_artifact.py` overwrites `model_path` (and load supplies `device`) at load time — verified by the passing round-trip above. Both fixes were applied **locally only** (patched Dockerfile via `-f`; a mounted monkeypatch wrapper); the pinned repos were not modified.
+Safe because evaluation runs before saving, the foundation weights are persisted separately via `save_tabpfn_model(model.ckpt)`, and `serving/load_artifact.py` overwrites `model_path` (and load supplies `device`) at load time — confirmed by the passing round-trip above, run against the merged build.
 
 ## v3 (TabPFN-3) — gated, resolved via HuggingFace {#v3}
 
@@ -94,11 +96,12 @@ Two minor follow-ups (not blocking): (a) with `DIMER_TABPFN_MODEL_PATH` set, `re
 
 ## What remains
 
-1. **D1 + D2 repo fixes** — committed on PR [#2](https://github.com/kurtvalcorza/tabpfn-classifier-finetuner/pull/2); pending dual-bot review + merge, then re-pin the finetuner commit in `COMPONENTS.json`.
-2. **Gate 8 (DIMER serving E2E)** — wire the artifact into the DIMER PoC serving layer and issue a real inference request.
-3. **Resource profile** — measured peak 5.4 GB (v2) / 7.3 GB (v3) on this smoke dataset; keep `DEPLOYMENT.md §3` at the 80 GB starting point until measured on representative data.
-4. **Minor** — provenance `baseModelSha256` under `DIMER_TABPFN_MODEL_PATH` (§v3); raise the portal license-acceptance discrepancy with Prior Labs.
-5. **v3 licensing for production** — the v3 weights remain **non-commercial**; DIMER production/external enablement still requires a commercial license from Prior Labs regardless of this local eval.
+D1/D2 are fixed and merged (finetuner `e93649a`), and this repo's `COMPONENTS.json` re-pins to it — those items are closed. Outstanding:
+
+1. **Gate 8 (DIMER serving E2E)** — wire the artifact into the DIMER PoC serving layer and issue a real inference request. Separate deferred gate, not a Phase 2 GPU-acceptance blocker.
+2. **Resource profile** — measured peak 5.4 GB (v2) / 7.3 GB (v3) on this smoke dataset; keep `DEPLOYMENT.md §3` at the 80 GB starting point until measured on representative data.
+3. **Minor** — provenance `baseModelSha256` under `DIMER_TABPFN_MODEL_PATH` (§v3); raise the portal license-acceptance discrepancy with Prior Labs.
+4. **v3 licensing for production** — the v3 weights remain **non-commercial**; DIMER production/external enablement still requires a commercial license from Prior Labs regardless of this local eval.
 
 ## Reproducibility
 
