@@ -16,7 +16,7 @@ jobs:
           cache-dependency-path: requirements-test.txt
       - run: pip install -r requirements-test.txt
       - run: python -m py_compile examples/build_synthetic_dataset.py serving/load_artifact.py
-      - run: PYTHONPATH=. pytest -q
+      - run: PYTHONPATH=. pytest -q -m "not integration"
       - name: Validate component manifest
         run: |
           python - <<'PY'
@@ -32,3 +32,18 @@ jobs:
               assert item["repository"].startswith("kurtvalcorza/")
               assert len(item["commit"]) == 40
           PY
+
+  # Integration tier: exercises the relocation loader with the real tabpfn
+  # package on CPU (real fit -> save -> relocate -> load -> predict).
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-test.txt
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install tabpfn==8.1.0 -r requirements-test.txt
+      - run: PYTHONPATH=. pytest -q -m integration
