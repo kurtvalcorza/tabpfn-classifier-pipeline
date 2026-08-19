@@ -4,7 +4,7 @@
 **Runtime host:** Windows 11 + WSL2 `nvidia-docker` distro, Docker 29.6.2
 **GPU:** RTX 5070 Ti Laptop, 12 GB VRAM, compute cap 12.0 (Blackwell / sm_120), driver 610.88
 **Stack:** `tabpfn==8.1.0`, `torch 2.11.0+cu128` (CUDA 12.8), base image `pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime`
-**Components:** validator `13c2ff0a` (unchanged); finetuner initial `1a94cf4c` → **`e93649a`** after the D1/D2 fixes were merged in finetuner PR #2. `COMPONENTS.json` pins `e93649a`.
+**Components:** finetuner D1/D2 fixes merged in PR #2 as `e93649a` (the acceptance run below). `COMPONENTS.json` has since advanced through later merged rounds and now pins validator `ecf0128` and finetuner `d3544a8` (version-aware limits, val-class coverage, reload-check + provenance, metadata); see `CONTRACT.md`.
 
 ## Verdict
 
@@ -96,7 +96,7 @@ Two minor follow-ups (not blocking): (a) with `DIMER_TABPFN_MODEL_PATH` set, `re
 
 ## What remains
 
-D1/D2 are fixed and merged (finetuner `e93649a`), and this repo's `COMPONENTS.json` re-pins to it — those items are closed. Outstanding:
+D1/D2 are fixed and merged (finetuner `e93649a`); `COMPONENTS.json` has since advanced and now pins validator `ecf0128` / finetuner `d3544a8` (see the Components note above). Those items are closed. Outstanding:
 
 1. **Gate 8 (DIMER serving E2E)** — wire the artifact into the DIMER PoC serving layer and issue a real inference request. Separate deferred gate, not a Phase 2 GPU-acceptance blocker.
 2. **Resource profile** — measured peak 5.4 GB (v2) / 7.3 GB (v3) on this smoke dataset; keep `DEPLOYMENT.md §3` at the 80 GB starting point until measured on representative data.
