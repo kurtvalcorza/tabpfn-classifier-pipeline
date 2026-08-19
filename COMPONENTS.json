@@ -9,7 +9,7 @@
     "finetuner": {
       "repository": "kurtvalcorza/tabpfn-classifier-finetuner",
       "branch": "main",
-      "commit": "1a94cf4cd32a37846b5edec2dd9d909f4c210159"
+      "commit": "e93649a01bfc0ade0ed6e284966d926088cfc795"
     }
   },
   "notes": "Pin immutable component commits for deployment review. Update this manifest only after component CI/review passes."
