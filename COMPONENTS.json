@@ -4,7 +4,7 @@
     "validator": {
       "repository": "kurtvalcorza/tabpfn-classifier-dataset-validator",
       "branch": "main",
-      "commit": "3e14b462479810e6e84177d3762c2d06d83a8fc2"
+      "commit": "a13d6ae8ce5f8bd2fd70870f05bfcfb4d85f9e80"
     },
     "finetuner": {
       "repository": "kurtvalcorza/tabpfn-classifier-finetuner",
