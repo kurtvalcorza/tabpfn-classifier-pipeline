@@ -4,12 +4,12 @@
     "validator": {
       "repository": "kurtvalcorza/tabpfn-classifier-dataset-validator",
       "branch": "main",
-      "commit": "ecf0128efdf3f7f4ecd20384fde60072c682379d"
+      "commit": "3e14b462479810e6e84177d3762c2d06d83a8fc2"
     },
     "finetuner": {
       "repository": "kurtvalcorza/tabpfn-classifier-finetuner",
       "branch": "main",
-      "commit": "d3544a8286244143f1b2e592d68c89eac2b15062"
+      "commit": "a60915265e0551ece49adc4871d3a1651097c769"
     }
   },
   "notes": "Pin immutable component commits for deployment review. Update this manifest only after component CI/review passes."
