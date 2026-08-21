@@ -156,4 +156,4 @@ Detailed operational steps are in [`DEPLOYMENT.md`](DEPLOYMENT.md).
 └── .github/workflows/ci.yml
 ```
 
-The pipeline repository deliberately does **not** contain copies of `validator.py` or `train.py`. Review and deploy the pinned component commits listed in `COMPONENTS.json`.
+The pipeline repository deliberately does **not** contain copies of `validate.py` or `train.py`. Review and deploy the pinned component commits listed in `COMPONENTS.json`.
