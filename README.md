@@ -23,9 +23,12 @@ TabPFN dataset validator
       v
 TabPFN classifier fine-tuner
       |
-      +--> model.tabpfn_fit
-      +--> model.ckpt
-      +--> artifact_manifest.json
+      +--> artifacts/model.tabpfn_fit
+      +--> artifacts/model.ckpt
+      +--> artifacts/artifact_manifest.json
+      +--> evaluation/report.json
+      +--> logs/run-summary.json
+      +--> progress/epoch_*.json
       +--> result.json
 ```
 
@@ -91,14 +94,19 @@ If `test.csv` is present, the same metrics are reported independently under `met
 A successful run writes:
 
 ```text
-/data/output/
-├── model.tabpfn_fit
-├── model.ckpt
-├── artifact_manifest.json
-└── checkpoints/             fine-tuning checkpoints when applicable
+/data/fine-tuning/<run_id>/
+├── artifacts/
+│   ├── model.tabpfn_fit
+│   ├── model.ckpt
+│   └── artifact_manifest.json
+├── evaluation/report.json
+├── logs/run-summary.json
+├── progress/epoch_*.json    per-epoch telemetry (best-effort)
+├── checkpoints/             fine-tuning checkpoints when applicable
+└── result.json
 ```
 
-`model.tabpfn_fit` is the fitted estimator state for round-trip inference. `model.ckpt` is the underlying foundation/fine-tuned model checkpoint. The manifest records target, feature order, classes, and artifact filenames.
+`model.tabpfn_fit` is the fitted estimator state for round-trip inference. `model.ckpt` is the underlying foundation/fine-tuned model checkpoint. The manifest records target, feature order, classes, and artifact filenames. `result.json` declares `artifacts.modelArtifact` (the fitted estimator, path relative to `/data`) that `export-to-repository` resolves; in GPU-burst mode it instead points at the S3 model key the run uploaded.
 
 ## Provenance
 

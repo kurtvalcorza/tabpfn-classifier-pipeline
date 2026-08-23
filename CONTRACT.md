@@ -86,21 +86,40 @@ for the production profile.
 ```jsonc
 {
   "successful": true,
-  "metrics": { "mode": "fine-tune|zero-shot-icl", "deviceName": "...",
+  "metrics": { "mode": "fine-tune|zero-shot-icl", "fineTuneEffective": true|false,
+               "fineTuneSkippedReason": "..|null", "deviceName": "...",
                "validation": { "accuracy": .., "balancedAccuracy": .., "logLoss": .., "rocAuc*": .. },
                "test": { .. | null } },
-  "artifacts": { "fittedEstimator": "model.tabpfn_fit", "foundationCheckpoint": "model.ckpt",
-                 "manifest": "artifact_manifest.json", "fittedEstimatorSha256": "..",
-                 "foundationCheckpointSha256": "..",
-                 "reloadCheck": { "passed": true, "device": "cpu", "rows": N } },
+  "artifacts": {
+    "modelArtifact":    { "path": "fine-tuning/<run_id>/artifacts/model.tabpfn_fit",
+                          "name": "model.tabpfn_fit", "contentType": "application/octet-stream",
+                          "sizeBytes": N },
+    "evaluationReport": { "path": "fine-tuning/<run_id>/evaluation/report.json", "..": ".." },
+    "logArtifact":      { "path": "fine-tuning/<run_id>/logs/run-summary.json", "..": ".." },
+    "foundationCheckpoint": { "path": "fine-tuning/<run_id>/artifacts/model.ckpt", "..": ".." },
+    "manifest": { "..": ".." }, "fittedSha256": "..", "foundationCheckpointSha256": "..",
+    "reloadCheck": { "passed": true, "device": "cpu", "rows": N }
+  },
   "provenance": { "model": {..}, "dataset": {"sha256": ".."}, "seed": N },
-  "metadata": { "template": "..", "taskType": "tabular_classification" }
+  "metadata": { "template": "..", "sessionId": "..", "runId": "..", "pipelineId": "..",
+                "datasetDir": "..", "outputDir": "..", "taskType": "tabular_classification",
+                "trainingParams": {..}, "pipelineMetadata": {..},
+                "device": { "expectedAccelerator": "..", "requestedDevice": "..",
+                            "selectedDevice": "cpu|cuda:N", "cudaAvailable": false,
+                            "cudaDeviceCount": 0, "devices": [], "fallbackReason": "..|null" },
+                "selectedModelId": "..", "baseModel": "..", "selectedModel": {..|null} }
 }
 ```
 
-`artifacts.reloadCheck` is written only after the finetuner reloads the saved
-artifact in-process and runs `predict_proba` — success is never reported for an
-artifact that cannot be reloaded.
+`artifacts.modelArtifact` is what `export-to-repository` resolves (via the backend's
+`_resolve_result_artifact`, which reads `path`/`key`); in GPU-burst mode it points at the
+uploaded S3 model key instead of the `/data`-relative path. `artifacts.reloadCheck` is
+written only after the finetuner reloads the saved artifact in-process and runs
+`predict_proba` — success is never reported for an artifact that cannot be reloaded.
+On the default (no-GPU) deployment a fine-tune request falls back to zero-shot ICL and
+records `metrics.fineTuneSkippedReason` rather than failing. On failure the same envelope
+is written with `successful: false`, an `error` object, and `metadata.baseModel`/
+`selectedModelId` still populated.
 
 ## 7. Classification smoke matrix
 
