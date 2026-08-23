@@ -136,8 +136,9 @@ tabpfn-classifier-pipeline/            (this umbrella)
 
 tabpfn-classifier-dataset-validator/   (CPU, own repo)
 ├── Dockerfile
-├── validate.py          DIMER-facing entrypoint (delegates to validator.py)
-└── validator.py         validation implementation
+├── validate.py          DIMER-facing entrypoint + validation logic
+├── requirements.txt
+└── tests/
 
 tabpfn-classifier-finetuner/           (GPU/CPU, own repo)
 ├── Dockerfile           tabpfn==8.1.0 on a CUDA PyTorch runtime
@@ -147,8 +148,7 @@ tabpfn-classifier-finetuner/           (GPU/CPU, own repo)
 
 DIMER builds each container repository from its root and launches the container by the portal
 naming convention: `validate.py` for the validator and `train.py` for the fine-tuner. The
-validator's tested logic lives in `validator.py`; `validate.py` is a thin entrypoint that delegates
-to it.
+validator's logic lives directly in `validate.py` (there is no separate implementation module).
 
 Keep `dimer-pipeline.json` at the fine-tuner repository root. It defines the preprocessing and
 fine-tuning fields end users see. Without it, the workbench preprocessing step renders empty and
@@ -261,7 +261,8 @@ it, deterministically and stratified), the validator's 2,000-feature ceiling
 (`DIMER_TABPFN_MAX_FEATURES`), and a minimum of 50 usable training rows, 2 classes, and 2 usable
 rows per class so a stratified holdout can preserve every class. Archive guards: 1 GiB top-level
 ZIP, 2 GiB total uncompressed, 512 MiB per member, 200:1 per-member compression ratio, 200 files;
-nested zips and path-traversal members are rejected. All of these are overridable by platform
+path-traversal members are rejected, and a single inner ZIP is transparently unwrapped and
+validated (only multiple top-level ZIPs are rejected). All of these are overridable by platform
 environment variables for an intentionally larger profile.
 
 ### Data licence governs the served model

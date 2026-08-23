@@ -13,7 +13,7 @@ dataset.zip
 
 The files may appear under one ordinary folder prefix, but each logical stem must resolve to **exactly one** table. For example, an archive containing both `a/train.csv` and `b/train.csv` is invalid.
 
-Nested ZIP files, path-traversal members, duplicate normalized archive paths, and archives exceeding configured resource limits are rejected.
+A single inner ZIP (an archive whose only content is one nested ZIP) is transparently unwrapped and its contents validated; only multiple top-level ZIPs are rejected as ambiguous. Path-traversal members, duplicate normalized archive paths, and archives exceeding configured resource limits are rejected.
 
 ## 2. Row semantics
 
