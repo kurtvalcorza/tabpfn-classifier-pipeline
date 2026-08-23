@@ -153,15 +153,23 @@ Detailed operational steps are in [`DEPLOYMENT.md`](DEPLOYMENT.md).
 ```text
 .
 ├── README.md
+├── CONTRACT.md          authoritative result/artifact envelope
 ├── MODEL_CARD.md
 ├── TABULAR_CLASSIFICATION_DATASET_SPEC.md
 ├── DEPLOYMENT.md
+├── DEVELOPMENT.md
+├── PHASE2_ACCEPTANCE_REPORT.md
 ├── COMPONENTS.json
+├── serving/
+│   ├── README.md
+│   └── load_artifact.py   directory-parameterized fitted+checkpoint loader
 ├── examples/
 │   └── build_synthetic_dataset.py
 ├── tests/
 │   └── test_example_builder.py
 └── .github/workflows/ci.yml
 ```
+
+The result/artifact envelope is specified in [`CONTRACT.md`](CONTRACT.md).
 
 The pipeline repository deliberately does **not** contain copies of `validate.py` or `train.py`. Review and deploy the pinned component commits listed in `COMPONENTS.json`.

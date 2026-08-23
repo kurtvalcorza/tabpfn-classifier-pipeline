@@ -106,9 +106,9 @@ Fine-tuner:
 
 ```text
 DIMER_DATASET_DIR=/data/dataset
-DIMER_OUTPUT_DIR=/data/output
-DIMER_RESULT_PATH=/data/results/result.json
-DIMER_TRAIN_DEVICE=cuda
+DIMER_OUTPUT_DIR=/data/fine-tuning/<run_id>   # DIMER sets this per run
+DIMER_RESULT_PATH=/data/fine-tuning/<run_id>/result.json
+DIMER_TRAIN_DEVICE=cpu                          # default deployment; "0"/cuda when GPU is enabled
 ```
 
 Both support `DIMER_DONE_CALLBACK`, `DIMER_PREPROCESSING_ARGS_JSON`, and `DIMER_PIPELINE_METADATA_JSON`; the fine-tuner also consumes `DIMER_HYPERPARAMETERS_JSON`.
@@ -159,11 +159,11 @@ Run on a CUDA host with the synthetic dataset and conservative settings:
 
 Acceptance criteria:
 
-- mode is `fine-tune`;
-- CUDA device is recorded;
+- mode is `fine-tune` on a GPU host (on a CPU host it is `zero-shot-icl` with `metrics.fineTuneSkippedReason` set);
+- the selected device is recorded in `metadata.device`;
 - validation metrics are present;
 - test metrics are present when `test.csv` is supplied;
-- `model.tabpfn_fit`, `model.ckpt`, and `artifact_manifest.json` exist;
+- `artifacts/model.tabpfn_fit`, `artifacts/model.ckpt`, and `artifacts/artifact_manifest.json` exist (plus `evaluation/report.json`, `logs/run-summary.json`, `progress/epoch_*.json`);
 - dataset hash is recorded;
 - explicitly mounted model checkpoint is hashed when configured;
 - callback behavior is correct.
@@ -172,7 +172,7 @@ Acceptance criteria:
 
 In a clean environment with the same supported TabPFN package version:
 
-1. Load `model.tabpfn_fit` with TabPFN's fitted-model loading utility.
+1. Load `artifacts/model.tabpfn_fit` with TabPFN's fitted-model loading utility (its companion `artifacts/model.ckpt` sits beside it).
 2. Load a fixed inference fixture.
 3. Run predictions and probabilities.
 4. Compare them with the predictions captured immediately after training.

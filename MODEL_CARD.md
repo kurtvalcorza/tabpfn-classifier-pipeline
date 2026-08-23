@@ -16,9 +16,9 @@ This pipeline is not for image, text-generation, object-detection, segmentation,
 
 ### Task-specific fine-tuning
 
-The fine-tuner uses Prior Labs' `FinetunedTabPFNClassifier` with explicit train and validation sets. Fine-tuning performs gradient updates to the pretrained model and requires CUDA in this implementation.
+The fine-tuner uses Prior Labs' `FinetunedTabPFNClassifier` with explicit train and validation sets. Fine-tuning performs gradient updates to the pretrained model and needs a CUDA GPU.
 
-The pipeline fails rather than silently switching modes when a user requests fine-tuning without a usable CUDA device.
+CPU is the default deployment (GPU is opt-in). When fine-tuning is requested without a usable CUDA device, the run falls back to zero-shot ICL and records the reason in `metrics.fineTuneSkippedReason` (`metrics.fineTuneEffective=false`) rather than failing.
 
 ### In-context / zero-shot mode
 
@@ -48,12 +48,13 @@ When a concrete local checkpoint path is available, the fine-tuner records its S
 
 ## Saved artifacts
 
-A successful run writes both:
+A successful run writes, under `DIMER_OUTPUT_DIR/artifacts/`:
 
 - `model.tabpfn_fit` — fitted estimator state, saved with TabPFN's fitted-model serialization utility.
 - `model.ckpt` — TabPFN model weights/checkpoint, saved with TabPFN's model serialization utility.
+- `artifact_manifest.json` — target column, ordered feature columns, class labels, and artifact names.
 
-The accompanying `artifact_manifest.json` records the target column, ordered feature columns, class labels, and artifact names.
+Alongside `artifacts/`, the run also writes `evaluation/report.json`, `logs/run-summary.json`, and `progress/epoch_*.json`, plus the `result.json` envelope (see `CONTRACT.md`). `result.json` declares `artifacts.modelArtifact` (path relative to `/data`) that DIMER's `export-to-repository` resolves.
 
 ## Evaluation
 
