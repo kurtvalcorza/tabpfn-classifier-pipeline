@@ -1,0 +1,20 @@
+name: contract-conformance
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  exact-component-candidates:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify immutable candidate contracts
+        env:
+          DIMER_COMPONENT_TOKEN: ${{ secrets.DIMER_COMPONENT_TOKEN }}
+        run: python scripts/check_component_contracts.py
