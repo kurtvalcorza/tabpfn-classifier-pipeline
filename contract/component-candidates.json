@@ -8,7 +8,7 @@
   "components": {
     "validator": {
       "repository": "kurtvalcorza/tabpfn-classifier-dataset-validator",
-      "commit": "4ff82023d26b100d866114660692766ef9996b0d",
+      "commit": "b54df3e34531f141cdad4d68cceb5207b2c0a5b4",
       "files": {
         "contract-snapshot.json": "2e6a289139e24ce2c85abf62643f30ea59e742ae",
         "dimer-pipeline.json": "5e3f23be9d30078df08f468657564e005fdeacb9",
@@ -18,7 +18,7 @@
     },
     "finetuner": {
       "repository": "kurtvalcorza/tabpfn-classifier-finetuner",
-      "commit": "9e5f84323d3032c7aec2e48c8c9b7f949a27e9fa",
+      "commit": "b8e3975225ff9963ede1174fb4696932f9c1f40a",
       "files": {
         "contract-snapshot.json": "2e6a289139e24ce2c85abf62643f30ea59e742ae",
         "dimer-pipeline.json": "5e3f23be9d30078df08f468657564e005fdeacb9",
