@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "codes": {
+    "CONTRACT_INVALID": ["config","contract"],
+    "DATASET_INVALID": ["dataset","validation"],
+    "MODEL_IDENTITY_MISMATCH": ["model"],
+    "MODEL_INTEGRITY_FAILED": ["model"],
+    "RESOURCE_UNAVAILABLE": ["runtime","device"],
+    "VALIDATION_FAILED": ["validation"],
+    "TRAINING_FAILED": ["training"],
+    "ARTIFACT_FAILED": ["artifact","persistence"],
+    "RELOAD_FAILED": ["reload","serving"],
+    "INTERRUPTED": ["interruption"],
+    "INTERNAL_ERROR": ["internal"]
+  }
+}
