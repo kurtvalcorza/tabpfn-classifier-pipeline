@@ -1,0 +1,21 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://dimer.local/contracts/tabpfn-classifier/validation-result-v1",
+  "type":"object","additionalProperties":false,
+  "required":["contractVersion","successful","message","metadata"],
+  "properties":{
+    "contractVersion":{"const":1},
+    "successful":{"type":"boolean"},
+    "message":{"type":"string"},
+    "datasetFingerprint":{"type":["string","null"],"pattern":"^[0-9a-f]{64}$"},
+    "sourceDigest":{"type":["string","null"],"pattern":"^[0-9a-f]{64}$"},
+    "datasetSummary":{"type":"object","additionalProperties":true},
+    "checks":{"type":"array","items":{"type":"object","additionalProperties":true}},
+    "metadata":{"type":"object","additionalProperties":true},
+    "provenance":{"type":"object","additionalProperties":true},
+    "error":{"$ref":"#/$defs/error"},
+    "extensions":{"type":"object","additionalProperties":true}
+  },
+  "allOf":[{"if":{"properties":{"successful":{"const":false}}},"then":{"required":["error"]}}],
+  "$defs":{"error":{"type":"object","additionalProperties":true,"required":["code","phase","message"],"properties":{"code":{"type":"string"},"phase":{"type":"string"},"message":{"type":"string"},"type":{"type":"string"},"traceback":{"type":"string"}}}}
+}
