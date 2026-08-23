@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "taskType": "tabular_classification",
+  "datasetPreprocessing": {
+    "target_column": {"type":"string","kind":"length","description":"Name of the categorical target column. Every other non-dropped column is a feature.","minLength":1,"maxLength":128,"default":"target"},
+    "drop_columns": {"type":"string","kind":"length","description":"Comma-separated columns to exclude from features, such as identifiers or raw timestamps.","minLength":0,"maxLength":512,"default":""},
+    "max_train_rows": {"type":"integer","kind":"range","description":"Maximum rows retained for task-specific training after validation. Sampling is deterministic and stratified.","minimum":50,"maximum":100000,"default":100000},
+    "validation_split": {"type":"number","kind":"range","description":"Stratified holdout fraction used only when val.csv is absent.","minimum":0.05,"maximum":0.4,"default":0.2}
+  },
+  "modelFinetuning": {
+    "fine_tune": {"type":"boolean","kind":"boolean","description":"Update TabPFN weights on the uploaded task. Requires CUDA. When false, run TabPFN as an in-context classifier without gradient updates.","default":true},
+    "model_version": {"type":"string","kind":"enum","description":"TabPFN generation. v3 is the current default generation; use default to follow the installed package default.","enum":["v3","default","v2.6","v2.5","v2"],"default":"v3"},
+    "epochs": {"type":"integer","kind":"range","description":"Maximum fine-tuning epochs.","minimum":1,"maximum":200,"default":30},
+    "learning_rate": {"type":"number","kind":"range","description":"AdamW learning rate for task-specific fine-tuning.","minimum":0.0000001,"maximum":0.001,"default":0.00001},
+    "weight_decay": {"type":"number","kind":"range","description":"AdamW weight decay.","minimum":0.0,"maximum":0.2,"default":0.01},
+    "time_limit_seconds": {"type":"integer","kind":"range","description":"Maximum fine-tuning wall-clock budget.","minimum":60,"maximum":21600,"default":3600},
+    "early_stopping_patience": {"type":"integer","kind":"range","description":"Validation epochs without improvement before early stopping.","minimum":1,"maximum":50,"default":8},
+    "eval_metric": {"type":"string","kind":"enum","description":"Primary validation metric used by TabPFN during fine-tuning.","enum":["roc_auc","log_loss"],"default":"roc_auc"},
+    "n_finetune_ctx_plus_query_samples": {"type":"integer","kind":"range","description":"Maximum context-plus-query samples drawn per fine-tuning epoch/batch configuration.","minimum":1000,"maximum":200000,"default":10000},
+    "n_estimators_finetune": {"type":"integer","kind":"range","description":"Ensemble estimators used inside the fine-tuning loop.","minimum":1,"maximum":16,"default":2},
+    "n_estimators_validation": {"type":"integer","kind":"range","description":"Estimators used for validation during fine-tuning.","minimum":1,"maximum":16,"default":2},
+    "n_estimators_final_inference": {"type":"integer","kind":"range","description":"Estimators retained for the final fitted inference model.","minimum":1,"maximum":32,"default":8},
+    "prediction_batch_rows": {"type":"integer","kind":"range","description":"Validation/test prediction chunk size used to bound peak memory.","minimum":128,"maximum":32768,"default":4096},
+    "seed": {"type":"integer","kind":"range","description":"RNG seed used for stratified sampling and TabPFN fine-tuning.","minimum":0,"maximum":2147483647,"default":0}
+  }
+}
