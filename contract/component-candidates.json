@@ -8,22 +8,24 @@
   "components": {
     "validator": {
       "repository": "kurtvalcorza/tabpfn-classifier-dataset-validator",
-      "commit": "b54df3e34531f141cdad4d68cceb5207b2c0a5b4",
+      "commit": "e0b67f8a2c9440cdb32294dc85c98b3257ae494f",
       "files": {
         "contract-snapshot.json": "2e6a289139e24ce2c85abf62643f30ea59e742ae",
         "dimer-pipeline.json": "5e3f23be9d30078df08f468657564e005fdeacb9",
         "dimer_contract_runtime.py": "54cd7cfccab6fa0c9ad16160c6f24b72421e0806",
-        "dimer_entrypoint.py": "c500ab9d62a8e17c4847ab53fa2fdeb101f82ced"
+        "dimer_model_contract.py": "c6090d614a56b40579020faa12b614f59dca6cc8",
+        "dimer_entrypoint.py": "8a2031e47ab7649a6c390e4eff6fe3ef0259ce1a"
       }
     },
     "finetuner": {
       "repository": "kurtvalcorza/tabpfn-classifier-finetuner",
-      "commit": "b8e3975225ff9963ede1174fb4696932f9c1f40a",
+      "commit": "fb9aa001a4e6a549a41b63e07b5fcb211e7a48d6",
       "files": {
         "contract-snapshot.json": "2e6a289139e24ce2c85abf62643f30ea59e742ae",
         "dimer-pipeline.json": "5e3f23be9d30078df08f468657564e005fdeacb9",
         "dimer_contract_runtime.py": "c0c0f0b5365418c1791c122fd4c2a0b6927dd382",
-        "dimer_entrypoint.py": "34d16f88cdd04e8976e6ce22a053e4e11a4a2d06",
+        "dimer_model_contract.py": "c6090d614a56b40579020faa12b614f59dca6cc8",
+        "dimer_entrypoint.py": "e1723144a437eb707bf3546759d647314e4bfab2",
         "dimer_burst_stage.py": "e4f83b57619f9705b510fffa4ea8e76d032b3998"
       }
     }
