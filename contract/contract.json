@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "contractVersion": 1,
+  "taskType": "tabular_classification",
+  "manifestAuthority": "dimer-pipeline.json",
+  "resultAuthority": "result.json",
+  "exitSemantics": {"success": 0, "failure": "nonzero"},
+  "callback": {"role": "completion-notification", "delivery": "best-effort", "maxAttempts": 1},
+  "datasetFingerprint": {
+    "algorithm": "sha256-path-content-v1",
+    "description": "SHA-256 over sorted normalized logical member path, NUL, file SHA-256, LF records after accepted single-nested-ZIP normalization. Uploaded/archive object SHA-256 is separate provenance."
+  },
+  "manifestCopies": {"authority": "umbrella-pipeline", "components": "vendored-and-digest-checked"},
+  "artifactPolicy": {
+    "normalMode": "normalized /data-relative paths only; absolute paths and traversal are invalid",
+    "gpuBurstMode": "backend-provided S3 keys are permitted",
+    "servingCriticalMembersRequireSha256": true
+  },
+  "schemaEvolution": {
+    "commonCore": "strict",
+    "extensionsField": "extensions",
+    "extensionsAdditionalProperties": true
+  },
+  "schemas": {
+    "workerParameters": "schemas/worker-parameters.schema.json",
+    "validationResult": "schemas/validation-result.schema.json",
+    "trainingResult": "schemas/training-result.schema.json",
+    "artifactManifest": "schemas/artifact-manifest.schema.json"
+  },
+  "modelVersions": "model-versions.json",
+  "errorCodes": "error-codes.json"
+}
