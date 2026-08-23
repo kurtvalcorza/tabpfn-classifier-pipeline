@@ -1,0 +1,38 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://dimer.local/contracts/tabpfn-classifier/worker-parameters-v1",
+  "title":"TabPFN classifier worker parameters v1",
+  "type":"object",
+  "additionalProperties":false,
+  "properties":{
+    "preprocessing":{
+      "type":"object","additionalProperties":false,
+      "properties":{
+        "target_column":{"type":"string","minLength":1,"maxLength":128,"default":"target"},
+        "drop_columns":{"type":"string","minLength":0,"maxLength":512,"default":""},
+        "max_train_rows":{"type":"integer","minimum":50,"maximum":100000,"default":100000},
+        "validation_split":{"type":"number","minimum":0.05,"maximum":0.4,"default":0.2}
+      }
+    },
+    "hyperparameters":{
+      "type":"object","additionalProperties":false,
+      "properties":{
+        "fine_tune":{"type":"boolean","default":true},
+        "model_version":{"type":"string","enum":["v3","default","v2.6","v2.5","v2"],"default":"v3"},
+        "epochs":{"type":"integer","minimum":1,"maximum":200,"default":30},
+        "learning_rate":{"type":"number","minimum":0.0000001,"maximum":0.001,"default":0.00001},
+        "weight_decay":{"type":"number","minimum":0,"maximum":0.2,"default":0.01},
+        "time_limit_seconds":{"type":"integer","minimum":60,"maximum":21600,"default":3600},
+        "early_stopping_patience":{"type":"integer","minimum":1,"maximum":50,"default":8},
+        "eval_metric":{"type":"string","enum":["roc_auc","log_loss"],"default":"roc_auc"},
+        "n_finetune_ctx_plus_query_samples":{"type":"integer","minimum":1000,"maximum":200000,"default":10000},
+        "n_estimators_finetune":{"type":"integer","minimum":1,"maximum":16,"default":2},
+        "n_estimators_validation":{"type":"integer","minimum":1,"maximum":16,"default":2},
+        "n_estimators_final_inference":{"type":"integer","minimum":1,"maximum":32,"default":8},
+        "prediction_batch_rows":{"type":"integer","minimum":128,"maximum":32768,"default":4096},
+        "seed":{"type":"integer","minimum":0,"maximum":2147483647,"default":0}
+      }
+    }
+  },
+  "required":["preprocessing","hyperparameters"]
+}
