@@ -1,0 +1,66 @@
+{
+  "artifactContract": {
+    "manifestSchemaVersion": 1,
+    "portableLoader": "tabpfn-classifier-pipeline/serving/load_artifact.py",
+    "required": [
+      "contractVersion",
+      "taskType",
+      "datasetFingerprint",
+      "datasetFingerprintAlgorithm",
+      "resolvedModel"
+    ]
+  },
+  "contractVersion": 1,
+  "dataset": {
+    "maxNestedZipDepth": 3,
+    "resourceLimits": {
+      "maxArchiveBytes": 1073741824,
+      "maxCompressionRatio": 200,
+      "maxFiles": 200,
+      "maxMemberBytes": 536870912,
+      "maxUncompressedBytes": 2147483648
+    }
+  },
+  "datasetFingerprintAlgorithm": "sha256-path-content-v1",
+  "legacyTransportHyperparameterKeys": [
+    "model_id",
+    "base_model"
+  ],
+  "modelVersions": {
+    "v2": {"max_classes": 10, "max_features": 500, "max_samples": 10000},
+    "v2.5": {"max_classes": 10, "max_features": 2000, "max_samples": 50000},
+    "v2.6": {"max_classes": 10, "max_features": 2000, "max_samples": 100000},
+    "v3": {"max_classes": 160, "max_features": 2000, "max_samples": 1000000}
+  },
+  "parameters": {
+    "hyperparameters": {
+      "early_stopping_patience": {"default": 8, "maximum": 50, "minimum": 1, "type": "integer"},
+      "epochs": {"default": 30, "maximum": 200, "minimum": 1, "type": "integer"},
+      "eval_metric": {"default": "roc_auc", "enum": ["roc_auc", "log_loss"], "type": "string"},
+      "fine_tune": {"default": true, "type": "boolean"},
+      "learning_rate": {"default": 1e-05, "maximum": 0.001, "minimum": 1e-07, "type": "number"},
+      "model_version": {"default": "v3", "enum": ["v3", "default", "v2.6", "v2.5", "v2"], "type": "string"},
+      "n_estimators_final_inference": {"default": 8, "maximum": 32, "minimum": 1, "type": "integer"},
+      "n_estimators_finetune": {"default": 2, "maximum": 16, "minimum": 1, "type": "integer"},
+      "n_estimators_validation": {"default": 2, "maximum": 16, "minimum": 1, "type": "integer"},
+      "n_finetune_ctx_plus_query_samples": {"default": 10000, "maximum": 200000, "minimum": 1000, "type": "integer"},
+      "prediction_batch_rows": {"default": 4096, "maximum": 32768, "minimum": 128, "type": "integer"},
+      "seed": {"default": 0, "maximum": 2147483647, "minimum": 0, "type": "integer"},
+      "time_limit_seconds": {"default": 3600, "maximum": 21600, "minimum": 60, "type": "integer"},
+      "weight_decay": {"default": 0.01, "maximum": 0.2, "minimum": 0.0, "type": "number"}
+    },
+    "preprocessing": {
+      "drop_columns": {"default": "", "maxLength": 512, "minLength": 0, "type": "string"},
+      "max_train_rows": {"default": 100000, "maximum": 100000, "minimum": 50, "type": "integer"},
+      "target_column": {"default": "target", "maxLength": 128, "minLength": 1, "type": "string"},
+      "validation_split": {"default": 0.2, "maximum": 0.4, "minimum": 0.05, "type": "number"}
+    }
+  },
+  "resultContract": {
+    "requiredMetadata": ["contractVersion", "taskType", "datasetFingerprint", "datasetFingerprintAlgorithm", "resolvedModel"],
+    "requiredTopLevel": ["successful", "contractVersion", "metadata"],
+    "successTrainingRequires": ["metrics", "artifacts", "provenance"],
+    "successValidationRequires": ["checks"]
+  },
+  "taskType": "tabular_classification"
+}

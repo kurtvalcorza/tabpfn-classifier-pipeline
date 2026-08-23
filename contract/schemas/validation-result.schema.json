@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dimer.local/contracts/tabpfn-classifier/validation-result-v1",
+  "type": "object",
+  "required": ["successful", "contractVersion", "metadata"],
+  "properties": {
+    "successful": {"type": "boolean"},
+    "contractVersion": {"const": 1},
+    "code": {"type": "string"},
+    "message": {"type": "string"},
+    "checks": {"type": "array", "items": {"type": "object"}},
+    "error": {"type": "object"},
+    "metadata": {
+      "type": "object",
+      "required": ["contractVersion", "taskType", "datasetFingerprint", "datasetFingerprintAlgorithm", "resolvedModel"],
+      "properties": {
+        "contractVersion": {"const": 1},
+        "taskType": {"const": "tabular_classification"},
+        "datasetFingerprint": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "datasetFingerprintAlgorithm": {"const": "sha256-path-content-v1"},
+        "resolvedModel": {"type": ["object", "null"]}
+      },
+      "additionalProperties": true
+    }
+  },
+  "allOf": [{"if": {"properties": {"successful": {"const": true}}}, "then": {"required": ["checks"]}}],
+  "additionalProperties": true
+}

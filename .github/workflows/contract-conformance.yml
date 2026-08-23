@@ -1,0 +1,21 @@
+name: contract-conformance
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  DIMER_COMPONENT_TOKEN: ${{ secrets.DIMER_COMPONENT_TOKEN }}
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pytest==8.4.1 jsonschema==4.25.1
+      - run: python scripts/check_component_contracts.py
+      - run: PYTHONPATH=. pytest -q tests/test_contract_v1.py

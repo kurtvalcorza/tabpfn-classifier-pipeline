@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dimer.local/contracts/tabpfn-classifier/training-result-v1",
+  "$defs": {
+    "artifactRef": {
+      "type": "object",
+      "allOf": [{"anyOf": [{"required": ["path"]}, {"required": ["key"]}]}],
+      "properties": {"path": {"type": "string"}, "key": {"type": "string"}, "name": {"type": "string"}, "sizeBytes": {"type": "integer", "minimum": 0}},
+      "additionalProperties": true
+    }
+  },
+  "type": "object",
+  "required": ["successful", "contractVersion", "metadata"],
+  "properties": {
+    "successful": {"type": "boolean"},
+    "contractVersion": {"const": 1},
+    "metrics": {"type": "object"},
+    "provenance": {"type": "object"},
+    "error": {"type": "object"},
+    "artifacts": {
+      "type": "object",
+      "properties": {
+        "modelArtifact": {"$ref": "#/$defs/artifactRef"},
+        "foundationCheckpoint": {"$ref": "#/$defs/artifactRef"},
+        "manifest": {"$ref": "#/$defs/artifactRef"},
+        "evaluationReport": {"$ref": "#/$defs/artifactRef"},
+        "logArtifact": {"$ref": "#/$defs/artifactRef"},
+        "reloadCheck": {"type": "object", "required": ["passed"], "properties": {"passed": {"const": true}}, "additionalProperties": true}
+      },
+      "additionalProperties": true
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["contractVersion", "taskType", "datasetFingerprint", "datasetFingerprintAlgorithm", "resolvedModel"],
+      "properties": {
+        "contractVersion": {"const": 1},
+        "taskType": {"const": "tabular_classification"},
+        "datasetFingerprint": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "datasetFingerprintAlgorithm": {"const": "sha256-path-content-v1"},
+        "resolvedModel": {"type": ["object", "null"]}
+      },
+      "additionalProperties": true
+    }
+  },
+  "allOf": [{"if": {"properties": {"successful": {"const": true}}}, "then": {"required": ["metrics", "artifacts", "provenance"], "properties": {"artifacts": {"required": ["modelArtifact", "foundationCheckpoint", "manifest", "reloadCheck"]}}}}],
+  "additionalProperties": true
+}

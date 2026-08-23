@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "modelFamily": "tabpfn",
+  "versions": {
+    "v2": {"maxSamples": 10000, "maxFeatures": 500, "maxClasses": 10},
+    "v2.5": {"maxSamples": 50000, "maxFeatures": 2000, "maxClasses": 10},
+    "v2.6": {"maxSamples": 100000, "maxFeatures": 2000, "maxClasses": 10},
+    "v3": {"maxSamples": 1000000, "maxFeatures": 2000, "maxClasses": 160}
+  }
+}

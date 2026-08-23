@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dimer.local/contracts/tabpfn-classifier/artifact-manifest-v1",
+  "type": "object",
+  "required": ["schemaVersion", "contractVersion", "taskType", "datasetFingerprint", "datasetFingerprintAlgorithm", "resolvedModel", "fittedEstimator", "fittedEstimatorSha256", "foundationCheckpoint", "foundationCheckpointSha256"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "contractVersion": {"const": 1},
+    "taskType": {"const": "tabular_classification"},
+    "datasetFingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "datasetFingerprintAlgorithm": {"const": "sha256-path-content-v1"},
+    "resolvedModel": {"type": "object"},
+    "fittedEstimator": {"type": "string", "minLength": 1},
+    "fittedEstimatorSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "foundationCheckpoint": {"type": "string", "minLength": 1},
+    "foundationCheckpointSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "additionalProperties": true
+}
