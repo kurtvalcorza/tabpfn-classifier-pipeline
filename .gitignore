@@ -5,3 +5,5 @@ __pycache__/
 .env
 tmp/
 *.zip
+# Local TabPFN base checkpoint — never committed; for the DIMER wizard upload or a local bake.
+weights/
