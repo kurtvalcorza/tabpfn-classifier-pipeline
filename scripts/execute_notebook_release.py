@@ -65,7 +65,7 @@ def _prepare(source: Path, work: Path, skip_bootstrap: bool, overrides: dict[str
         if cell.cell_type != "code":
             continue
         for name, value in overrides.items():  # only `NAME = ...  # @param` form lines are overridable
-            cell.source = re.sub(rf"^{name} = .*?(  # @param.*)$", rf"{name} = {value}", cell.source, flags=re.M)
+            cell.source = re.sub(rf"^{name} = .*?(  # @param.*)$", lambda m, n=name, v=value: f"{n} = {v}{m.group(1)}", cell.source, flags=re.M)
         if skip_bootstrap and idx == 1:
             kept = [l for l in cell.source.splitlines() if not l.lstrip().startswith(("!", "%"))
                     and "shutil.rmtree" not in l and "if d.exists()" not in l and "for d in (" not in l and "if PIPE_DIR.exists()" not in l]
