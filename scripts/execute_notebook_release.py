@@ -21,6 +21,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import textwrap
@@ -57,12 +58,14 @@ def _install_shim(work: Path) -> Path:
     return site
 
 
-def _prepare(source: Path, work: Path, skip_bootstrap: bool) -> nbformat.NotebookNode:
+def _prepare(source: Path, work: Path, skip_bootstrap: bool, overrides: dict[str, str]) -> nbformat.NotebookNode:
     nb = nbformat.read(source, as_version=4)
     content_root = (work / "content").as_posix()
     for idx, cell in enumerate(nb.cells):
         if cell.cell_type != "code":
             continue
+        for name, value in overrides.items():  # only `NAME = ...  # @param` form lines are overridable
+            cell.source = re.sub(rf"^{name} = .*?(  # @param.*)$", rf"{name} = {value}", cell.source, flags=re.M)
         if skip_bootstrap and idx == 1:
             kept = [l for l in cell.source.splitlines() if not l.lstrip().startswith(("!", "%"))
                     and "shutil.rmtree" not in l and "if d.exists()" not in l and "for d in (" not in l and "if PIPE_DIR.exists()" not in l]
@@ -97,7 +100,7 @@ def make_genuinely_new_rows(path: Path, feature_columns: list[str], reference_cs
     numeric = ref[feature_columns].select_dtypes(include=np.number)
     fresh = ref[feature_columns].head(8).copy()
     for c in numeric.columns:
-        fresh[c] = (numeric[c].mean() + np.linspace(-0.37, 0.37, len(fresh)) * numeric[c].std()).to_numpy()
+        fresh[c] = numeric[c].mean() + np.linspace(-0.37, 0.37, len(fresh)) * numeric[c].std()
     if fresh.equals(ref[feature_columns].head(8)):
         raise RuntimeError("fresh rows must differ from the producer sample")
     fresh.to_csv(path, index=False)
@@ -112,7 +115,9 @@ def main() -> int:
                         help="git URL or local path of the worker repository (checked out at the COMPONENTS.json commit)")
     parser.add_argument("--timeout", type=int, default=3600)
     parser.add_argument("--evidence", type=Path, default=None)
+    parser.add_argument("--set", action="append", default=[], metavar="NAME=VALUE", help="override a `# @param` form value in the E2E notebook, e.g. --set FINE_TUNE=True")
     args = parser.parse_args()
+    overrides = dict(item.split("=", 1) for item in args.set)
 
     work = args.work.resolve(); content = work / "content"; content.mkdir(parents=True, exist_ok=True)
     site = _install_shim(work)
@@ -122,7 +127,7 @@ def main() -> int:
     dirty = subprocess.check_output(["git", "-C", str(ROOT), "status", "--porcelain"], text=True).strip()
 
     main_executed = work / "tabpfn_classifier_colab.executed.ipynb"
-    _execute(_prepare(MAIN, work, args.skip_bootstrap), main_executed, content, env, args.timeout)
+    _execute(_prepare(MAIN, work, args.skip_bootstrap, overrides), main_executed, content, env, args.timeout)
     art = content / "dimer" / "output" / "artifacts"
     manifest_path = art / "artifact_manifest.json"
     if not manifest_path.exists():
@@ -139,7 +144,7 @@ def main() -> int:
     fresh = make_genuinely_new_rows(fresh_rows, manifest["featureColumns"], reference)
     env["DIMER_UPLOAD_FILES"] = f"{manifest_path}|{art / manifest['fittedEstimator']}|{art / manifest['foundationCheckpoint']};{fresh_rows}"
     inference_executed = work / "tabpfn_classifier_artifact_inference_colab.executed.ipynb"
-    _execute(_prepare(INFERENCE, work, args.skip_bootstrap), inference_executed, content, env, args.timeout)
+    _execute(_prepare(INFERENCE, work, args.skip_bootstrap, {}), inference_executed, content, env, args.timeout)
 
     predictions = content / "tabpfn-artifact-inference-output" / "tabpfn_classification_predictions.csv"
     if not predictions.exists():
@@ -157,7 +162,7 @@ def main() -> int:
         "engine": "nbclient / IPython kernel, one fresh kernel per notebook",
         "environment": {"host": platform.node(), "os": platform.platform(), "python": platform.python_version(), "torch": torch.__version__,
                         "tabpfn": md.version("tabpfn"), "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None},
-        "substitutions": {"contentRoot": str(content), "bootstrapSkipped": args.skip_bootstrap, "uploadShim": "google.colab.files.upload() served from DIMER_UPLOAD_FILES"},
+        "substitutions": {"contentRoot": str(content), "bootstrapSkipped": args.skip_bootstrap, "paramOverrides": overrides, "uploadShim": "google.colab.files.upload() served from DIMER_UPLOAD_FILES"},
         "notColab": "Clean local-kernel execution, not a Google Colab run; a Colab record is still required for a Colab claim.",
         "e2e": {"executedNotebook": str(main_executed), "metrics": metrics},
         "artifactInference": {"executedNotebook": str(inference_executed), "externalArtifact": str(manifest_path), "freshRows": str(fresh_rows), "rowsScored": int(len(result))},
