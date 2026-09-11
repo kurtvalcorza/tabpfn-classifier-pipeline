@@ -1,0 +1,10 @@
+# DIMER tutorial runtime pins for TabPFN Classification.
+# torch matches the finetuner's Docker base image (pytorch/pytorch:2.11.0-cuda12.8); the
+# remaining pins mirror tabpfn-classifier-finetuner/requirements.txt at the COMPONENTS.json commit.
+torch==2.11.0
+tabpfn==8.1.0
+pandas==2.3.2
+scikit-learn==1.9.0
+requests==2.32.5
+boto3==1.40.14
+nbformat==5.10.4
