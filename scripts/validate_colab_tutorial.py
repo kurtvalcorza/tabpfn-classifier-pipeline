@@ -21,6 +21,7 @@ EXPECTED_PROFILES = {
 }
 ABSOLUTE_PATH_PATTERNS = [re.compile(r"[a-zA-Z]:[\\/]"), re.compile(r"/(?:Users|home|root)/")]
 PLACEHOLDER_PATTERN = re.compile(r"\b(?:TODO|TBD|FIXME)\b", re.IGNORECASE)
+CREDENTIAL_IN_URL = re.compile(r"https://[^\s\"']*(?:GITHUB_TOKEN|x-access-token|token)[^\s\"']*@github\.com", re.IGNORECASE)
 E2E_REQUIRED = {
     "BYOD path": "USE_BYOD",
     "pinned worker commit check": "!= pinned",
@@ -35,7 +36,10 @@ E2E_REQUIRED = {
     "licence statement": "tabpfn-3-license-v1.0",
     "class probabilities": ".predict_proba(",
     "decision rule": "argmax",
-    "probability semantics": "calibrated"
+    "probability semantics": "calibrated",
+    "private-source secret": "GITHUB_TOKEN",
+    "ephemeral git header": "GIT_CONFIG_KEY_0",
+    "git extra header": ".extraheader",
 }
 AI_REQUIRED = {
     "external upload": "files.upload(",
@@ -47,12 +51,12 @@ AI_REQUIRED = {
     "machine-readable predictions": "to_csv(",
     "provenance": "provenance",
     "trust boundary": "Trust boundary",
-    "schema check": "Feature schema mismatch"
+    "schema check": "Feature schema mismatch",
 }
 AI_FORBIDDEN = {
     "worker invocation": "worker.run(",
     "synthetic sample": "build_synthetic_dataset",
-    "in-notebook fitting": ".fit("
+    "in-notebook fitting": ".fit(",
 }
 COMMON_REQUIRED = {"supported Python floor": "Python 3.11+", "runtime Python guard": "sys.version_info < (3, 11)"}
 
@@ -123,6 +127,10 @@ def validate_notebook(nb_path: Path) -> None:
     _require_markers(nb_path.name, profile, text, COMMON_REQUIRED)
     if profile == "E2E":
         _require_markers(nb_path.name, profile, text, E2E_REQUIRED)
+        if CREDENTIAL_IN_URL.search(text):
+            raise AssertionError(f"{nb_path.name}: credential-bearing GitHub clone URL is forbidden")
+        if "git config --global" in text or "git config --local" in text:
+            raise AssertionError(f"{nb_path.name}: persistent Git credential configuration is forbidden")
         if "smoke tutorial" in text.lower():
             raise AssertionError(f"{nb_path.name}: E2E notebook must not identify itself as smoke")
     if profile == "ARTIFACT-INFERENCE":
