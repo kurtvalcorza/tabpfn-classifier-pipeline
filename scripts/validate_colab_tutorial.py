@@ -59,6 +59,14 @@ AI_FORBIDDEN = {
     "in-notebook fitting": ".fit(",
 }
 COMMON_REQUIRED = {"supported Python floor": "Python 3.11+", "runtime Python guard": "sys.version_info < (3, 11)"}
+# Checked against code cells only: prose mentioning a marker must not satisfy a behavioural contract.
+CODE_REQUIRED = {
+    "pipeline ref override": "DIMER_TUTORIAL_REF",
+    "detached pipeline checkout": "--detach",
+    "resolved revision guard": "!= requested",
+    "recorded pipeline revision": "PIPE_COMMIT",
+    "pipeline revision in provenance": '"commit": PIPE_COMMIT',
+}
 BOOTSTRAP_OPEN = "# >>> colab-bootstrap"
 BOOTSTRAP_CLOSE = "# <<< colab-bootstrap"
 # Never legitimate outside a bootstrap region, in any cell.
@@ -109,9 +117,11 @@ def check_absolute_paths(code: str, filename: str, cell_idx: int) -> None:
                 raise AssertionError(f"{filename} (cell {cell_idx}): Absolute filesystem path detected: {line.strip()}")
 
 
-def _source_text(nb: dict) -> str:
+def _source_text(nb: dict, *, code_only: bool = False) -> str:
     parts = []
     for cell in nb.get("cells", []):
+        if code_only and cell.get("cell_type") != "code":
+            continue
         source = cell.get("source", "")
         parts.append("".join(source) if isinstance(source, list) else str(source))
     return "\n".join(parts)
@@ -173,6 +183,7 @@ def validate_notebook(nb_path: Path) -> None:
     if PLACEHOLDER_PATTERN.search(text):
         raise AssertionError(f"{nb_path.name}: unresolved TODO/TBD/FIXME placeholder found")
     _require_markers(nb_path.name, profile, text, COMMON_REQUIRED)
+    _require_markers(nb_path.name, profile, _source_text(nb, code_only=True), CODE_REQUIRED)
     if profile == "E2E":
         _require_markers(nb_path.name, profile, text, E2E_REQUIRED)
         if CREDENTIAL_IN_URL.search(text):

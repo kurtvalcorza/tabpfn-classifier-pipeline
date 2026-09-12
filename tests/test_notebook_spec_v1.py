@@ -41,6 +41,11 @@ def _source(nb: dict) -> str:
     return "\n".join("".join(c.get("source", "")) if isinstance(c.get("source"), list) else str(c.get("source", "")) for c in nb["cells"])
 
 
+def _code(nb: dict) -> str:
+    """Code cells only - prose mentioning a marker must not satisfy a behavioural assertion."""
+    return "\n".join("".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code")
+
+
 def test_static_validator_passes():
     subprocess.run([sys.executable, str(ROOT / "scripts" / "validate_colab_tutorial.py")], check=True)
 
@@ -147,6 +152,32 @@ def test_skip_bootstrap_applies_a_real_override(tmp_path):
     source = "\n".join(c.source for c in nb.cells if c.cell_type == "code")
     assert "FINE_TUNE = True  # @param" in source
     assert "git clone" not in source and "pip install" not in source
+
+
+def test_both_notebooks_pin_and_record_the_pipeline_revision():
+    """Evidence is only evidence for a revision the run can name."""
+    for name in (E2E, ARTIFACT_INFERENCE):
+        code = _code(_load(name))
+        assert "DIMER_TUTORIAL_REF" in code, name
+        assert "--no-checkout" in code and "--detach" in code, name
+        assert "PIPE_COMMIT != PIPE_REF" in code, name
+        assert '"commit": PIPE_COMMIT' in code, f"{name}: resolved revision missing from provenance"
+
+
+def test_revision_guard_survives_skip_bootstrap():
+    """The harness drops the checkout, so the guard must still verify what was staged."""
+    for name in (E2E, ARTIFACT_INFERENCE):
+        cell = next(c for c in _load(name)["cells"] if c["cell_type"] == "code")
+        stripped, _ = strip_bootstrap("".join(cell["source"]))
+        assert "PIPE_COMMIT = subprocess.check_output" in stripped, name
+        assert "PIPE_COMMIT != PIPE_REF" in stripped, name
+        assert "git clone" not in stripped, name
+
+
+def test_harness_pins_the_notebook_to_the_staged_commit():
+    source = (ROOT / "scripts" / "execute_notebook_release.py").read_text(encoding="utf-8")
+    assert 'env["DIMER_TUTORIAL_REF"] = commit' in source
+    assert '"tutorialRef": commit' in source
 
 
 def test_requirements_colab_pins_everything():

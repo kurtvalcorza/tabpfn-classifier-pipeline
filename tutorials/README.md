@@ -18,6 +18,7 @@ These notebooks exercise the repository's production code path — the DIMER fin
 
 - Dependencies are pinned in [`requirements-colab.txt`](requirements-colab.txt): `torch==2.11.0` (the finetuner's Docker base image version) plus the finetuner's own `requirements.txt` pins (`tabpfn==8.1.0`, `pandas==2.3.2`, `scikit-learn==1.9.0`, `requests`, `boto3`).
 - The worker is pinned by immutable commit in `COMPONENTS.json`; the E2E notebook refuses to continue if the clone is not at that commit.
+- Both notebooks pin the **pipeline** revision too: `TUTORIAL_REF` (default `main`, overridden by the `DIMER_TUTORIAL_REF` environment variable) is fetched and checked out detached, a 40-character ref is verified against the resolved commit, and the resolved SHA is printed and written to provenance as `pipeline.commit`. `scripts/execute_notebook_release.py` sets it to the commit it staged. Without this an execution record names a worker commit but not the repository revision whose loader and example builder actually ran.
 - `tabpfn-classifier-finetuner` is private. The E2E notebook needs a `GITHUB_TOKEN` with read access, supplied as a Colab Secret or an environment variable, and fails closed without one. The token reaches Git only through an ephemeral `http.<url>.extraheader` in the clone subprocess environment — never a credential-bearing URL, never persisted `.git/config`, never printed or recorded in provenance.
 - Every line that clones or installs sits inside a `# >>> colab-bootstrap` … `# <<< colab-bootstrap` region. `scripts/execute_notebook_release.py --skip-bootstrap` drops exactly those regions, fails closed if a notebook has none, and CI rejects environment setup that escapes one — so a notebook run against a pre-staged checkout can never silently re-clone over it.
 - Model generation is explicit (`MODEL_VERSION`). The tutorial defaults to `v2` because its weights carry Prior Labs' Apache-derived licence; DIMER's default `v3` is selectable but its weights are under `tabpfn-3-license-v1.0`, whose Non-Commercial Purpose excludes production deployment. As checked on 2026-09-11 neither `Prior-Labs/TabPFN-v2-*` nor `Prior-Labs/tabpfn_3` is access-gated on Hugging Face.
@@ -41,7 +42,7 @@ CI covers notebook JSON/source structure, Python-cell compilation, profile metad
 
 ### Execution records
 
-Each row is evidence for the revision it names and for nothing later. The rows below predate the
+Each row is evidence for the revision named in its own `pipeline.commit`, and for nothing later. The rows below predate the
 secure private-source bootstrap and the `# >>> colab-bootstrap` harness contract, so they are
 **superseded**: they do not carry to the current candidate head, and no Colab record exists for any
 revision. A fresh `scripts/execute_notebook_release.py` record at the candidate head, and then a

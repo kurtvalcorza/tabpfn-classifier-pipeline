@@ -14,7 +14,9 @@ Disclosed substitutions, recorded in the evidence JSON:
    interpreter must already provide the lock set, and the worker is cloned by this script from
    `--finetuner-source` (a local path or URL) at the commit pinned in COMPONENTS.json, so the
    notebook's own pinned-commit check still runs against a real checkout.
-3. `google.colab.files.upload()` is served by a shim that returns the files named in
+3. `DIMER_TUTORIAL_REF` is set to the staged pipeline commit, so the notebook's own revision guard
+   checks the checkout this script prepared and provenance records that exact SHA.
+4. `google.colab.files.upload()` is served by a shim that returns the files named in
    `DIMER_UPLOAD_FILES` (`;`-separated batches, `|`-separated files) instead of a dialog.
 """
 from __future__ import annotations
@@ -163,6 +165,7 @@ def main() -> int:
     env = {"PYTHONPATH": str(site) + os.pathsep + os.environ.get("PYTHONPATH", "")}
     ft_repo, ft_commit = _stage_repos(content, args.finetuner_source)
     commit = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
+    env["DIMER_TUTORIAL_REF"] = commit  # the notebook guard then checks the checkout staged above
     dirty = subprocess.check_output(["git", "-C", str(ROOT), "status", "--porcelain"], text=True).strip()
 
     main_executed = work / "tabpfn_classifier_colab.executed.ipynb"
@@ -201,7 +204,8 @@ def main() -> int:
         "engine": "nbclient / IPython kernel, one fresh kernel per notebook",
         "environment": {"host": platform.node(), "os": platform.platform(), "python": platform.python_version(), "torch": torch.__version__,
                         "tabpfn": md.version("tabpfn"), "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None},
-        "substitutions": {"contentRoot": str(content), "bootstrapSkipped": args.skip_bootstrap, "paramOverrides": overrides, "uploadShim": "google.colab.files.upload() served from DIMER_UPLOAD_FILES"},
+        "substitutions": {"contentRoot": str(content), "bootstrapSkipped": args.skip_bootstrap, "paramOverrides": overrides,
+                          "tutorialRef": commit, "uploadShim": "google.colab.files.upload() served from DIMER_UPLOAD_FILES"},
         "notColab": "Clean local-kernel execution, not a Google Colab run; a Colab record is still required for a Colab claim.",
         "e2e": {"executedNotebook": str(main_executed), "metrics": metrics},
         "artifactInference": {"executedNotebook": str(inference_executed), "externalArtifact": str(manifest_path), "freshRows": str(fresh_rows), "rowsScored": int(len(result))},
