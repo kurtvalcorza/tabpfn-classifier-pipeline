@@ -9,7 +9,7 @@ produces a saved model artifact plus a holdout score.
 Unlike some tabular foundation models, TabPFN's newer generations do **not** ship under an
 unrestricted open-weights licence: the code and the older **v2** weights carry Prior Labs'
 Apache-derived licence (commercial use permitted), while the **v2.5 / v2.6 / v3** weights are
-**non-commercial** and **v3 is Hugging Face-gated**. Because this pipeline defaults to v3, the
+**non-commercial**; v3 is currently downloadable without Hugging Face access gating. Because this pipeline defaults to v3, the
 model weights themselves, not only the training data, gate what a served pipeline may do — see
 [Data licence governs the served model](#data-licence-governs-the-served-model).
 
@@ -48,7 +48,7 @@ card):
 | `v2` | 10,000 | 500 | 10 | Apache-derived (commercial OK) |
 | `v2.5` | 50,000 | 2,000 | 10 | non-commercial |
 | `v2.6` | 100,000 | 2,000 | 10 | non-commercial |
-| `v3` (default) | 1,000,000 | 2,000 | 160 | non-commercial, HF-gated |
+| `v3` (default) | 1,000,000 | 2,000 | 160 | non-commercial; not access-gated |
 
 `default` follows the installed package's own default generation and applies no version-specific
 tightening beyond the generic platform limits. Feature count and **class count** are hard rejects;
@@ -179,7 +179,7 @@ GitHub App.
    | Fine-tuner repository | `https://github.com/kurtvalcorza/tabpfn-classifier-finetuner` |
 
 2. Build the validator image, then the CUDA fine-tuner image.
-3. Mount or allow download of the approved TabPFN checkpoint (required for the gated `v2.5` /
+3. Mount or allow download of the approved TabPFN checkpoint (required for the non-commercial `v2.5` /
    `v2.6` / `v3` generations — see [DEPLOYMENT.md → Model-weight delivery](DEPLOYMENT.md)).
 4. Run the smoke test with a small dataset.
 5. Enable the pipeline **only after** the on-platform serving check in the release gate passes, and
@@ -469,7 +469,7 @@ from Prior Labs.
 | Base model | [TabPFN](https://github.com/PriorLabs/TabPFN), Prior Labs |
 | Default generation | `v3` (TabPFN-3) via `tabpfn==8.1.0` |
 | Estimators | `TabPFNClassifier` (zero-shot ICL), `FinetunedTabPFNClassifier` (fine-tune) |
-| Gated v3 weights | [`Prior-Labs/tabpfn_3`](https://huggingface.co/Prior-Labs/tabpfn_3) (Hugging Face-gated, non-commercial) |
+| v3 weights | [`Prior-Labs/tabpfn_3`](https://huggingface.co/Prior-Labs/tabpfn_3) (not access-gated; non-commercial) |
 | Licence | `v2` Apache-derived (commercial OK); `v2.5` / `v2.6` / `v3` non-commercial |
 | Component pins | `COMPONENTS.json` (immutable validator + finetuner commit SHAs) |
 
@@ -503,8 +503,8 @@ SHA-256s, and the input dataset SHA-256. Paired with the container image digest 
 - [TabPFN source code](https://github.com/PriorLabs/TabPFN), Prior Labs.
 - [Prior Labs documentation](https://docs.priorlabs.ai/) and
   [licensing FAQ](https://docs.priorlabs.ai/faq#licensing).
-- [`Prior-Labs/tabpfn_3`](https://huggingface.co/Prior-Labs/tabpfn_3) gated model repository (v3
-  weights, non-commercial), Hugging Face.
+- [`Prior-Labs/tabpfn_3`](https://huggingface.co/Prior-Labs/tabpfn_3) model repository (v3
+  weights, non-commercial and not access-gated), Hugging Face.
 - Pipeline docs: [`CONTRACT.md`](CONTRACT.md) (result/artifact envelope),
   [`MODEL_CARD.md`](MODEL_CARD.md), [`TABULAR_CLASSIFICATION_DATASET_SPEC.md`](TABULAR_CLASSIFICATION_DATASET_SPEC.md),
   [`DEPLOYMENT.md`](DEPLOYMENT.md), [`PHASE2_ACCEPTANCE_REPORT.md`](PHASE2_ACCEPTANCE_REPORT.md).
