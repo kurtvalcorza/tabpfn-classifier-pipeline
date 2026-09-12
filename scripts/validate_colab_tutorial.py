@@ -59,6 +59,38 @@ AI_FORBIDDEN = {
     "in-notebook fitting": ".fit(",
 }
 COMMON_REQUIRED = {"supported Python floor": "Python 3.11+", "runtime Python guard": "sys.version_info < (3, 11)"}
+BOOTSTRAP_OPEN = "# >>> colab-bootstrap"
+BOOTSTRAP_CLOSE = "# <<< colab-bootstrap"
+SETUP_TOKENS = ("git clone", "pip install", "shutil.rmtree", "GITHUB_TOKEN")
+
+
+def strip_bootstrap(code: str) -> tuple[str, int]:
+    """Drop every `# >>> colab-bootstrap` ... `# <<< colab-bootstrap` region and every IPython line.
+
+    `scripts/execute_notebook_release.py --skip-bootstrap` applies exactly this rule so a notebook
+    runs against an already-provisioned checkout and lock set. It lives in the validator so the
+    static tests can exercise the real rule without the execution harness's dependencies.
+    """
+    kept: list[str] = []
+    regions, inside = 0, False
+    for line in code.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(BOOTSTRAP_OPEN):
+            if inside:
+                raise AssertionError("nested colab-bootstrap region")
+            inside, regions = True, regions + 1
+            continue
+        if stripped.startswith(BOOTSTRAP_CLOSE):
+            if not inside:
+                raise AssertionError("colab-bootstrap close without a matching open")
+            inside = False
+            continue
+        if inside or stripped.startswith(("!", "%")):
+            continue
+        kept.append(line)
+    if inside:
+        raise AssertionError("unterminated colab-bootstrap region")
+    return "\n".join(kept) + "\n", regions
 
 
 def clean_code_for_ast(code: str) -> str:
@@ -97,6 +129,7 @@ def validate_notebook(nb_path: Path) -> None:
         raise AssertionError(f"{nb_path.name}: invalid notebook JSON: {exc}") from exc
     if nb.get("nbformat") != 4 or not nb.get("cells"):
         raise AssertionError(f"{nb_path.name}: must be nbformat 4 with cells")
+    bootstrap_regions = 0
     for idx, cell in enumerate(nb["cells"]):
         if cell.get("execution_count") is not None or cell.get("outputs") not in (None, []):
             raise AssertionError(f"{nb_path.name} (cell {idx}): execution state must be cleared")
@@ -111,7 +144,19 @@ def validate_notebook(nb_path: Path) -> None:
             ast.parse(clean_code_for_ast(code), filename=f"{nb_path.name}:cell_{idx}")
         except SyntaxError as exc:
             raise AssertionError(f"Syntax error in {nb_path.name} (cell {idx}): {exc}") from exc
+        without_bootstrap, found = strip_bootstrap(code)
+        bootstrap_regions += found
+        if found:
+            for line in without_bootstrap.splitlines():
+                if any(token in line for token in SETUP_TOKENS):
+                    raise AssertionError(f"{nb_path.name} (cell {idx}): environment setup outside a colab-bootstrap region: {line.strip()}")
+            try:
+                ast.parse(clean_code_for_ast(without_bootstrap), filename=f"{nb_path.name}:cell_{idx}:skip-bootstrap")
+            except SyntaxError as exc:
+                raise AssertionError(f"{nb_path.name} (cell {idx}): does not parse with the bootstrap region removed: {exc}") from exc
 
+    if bootstrap_regions < 1:
+        raise AssertionError(f"{nb_path.name}: no colab-bootstrap region; --skip-bootstrap would re-run the clone and install")
     text = _source_text(nb)
     dimer = nb.get("metadata", {}).get("dimer", {})
     profile = dimer.get("notebook_profile")

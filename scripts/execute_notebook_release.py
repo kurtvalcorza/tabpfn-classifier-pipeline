@@ -8,7 +8,8 @@ same external-artifact boundary an interactive Colab user crosses with the uploa
 
 Disclosed substitutions, recorded in the evidence JSON:
 1. `/content/...` paths are rewritten to `<work>/content/...`.
-2. With `--skip-bootstrap`, the clone/pip lines of the bootstrap cell are dropped; the executing
+2. With `--skip-bootstrap`, every `# >>> colab-bootstrap` ... `# <<< colab-bootstrap` region and
+   every IPython `!`/`%` line is dropped; the executing
    interpreter must already provide the lock set, and the worker is cloned by this script from
    `--finetuner-source` (a local path or URL) at the commit pinned in COMPONENTS.json, so the
    notebook's own pinned-commit check still runs against a real checkout.
@@ -32,6 +33,9 @@ import nbformat
 import numpy as np
 import pandas as pd
 from nbclient import NotebookClient
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from validate_colab_tutorial import strip_bootstrap  # noqa: E402  (shared --skip-bootstrap rule)
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / "tutorials/tabpfn_classifier_colab.ipynb"
@@ -61,16 +65,21 @@ def _install_shim(work: Path) -> Path:
 def _prepare(source: Path, work: Path, skip_bootstrap: bool, overrides: dict[str, str]) -> nbformat.NotebookNode:
     nb = nbformat.read(source, as_version=4)
     content_root = (work / "content").as_posix()
-    for idx, cell in enumerate(nb.cells):
+    regions = 0
+    for cell in nb.cells:
         if cell.cell_type != "code":
             continue
         for name, value in overrides.items():  # only `NAME = ...  # @param` form lines are overridable
             cell.source = re.sub(rf"^{name} = .*?(  # @param.*)$", lambda m, n=name, v=value: f"{n} = {v}{m.group(1)}", cell.source, flags=re.M)
-        if skip_bootstrap and idx == 1:
-            kept = [l for l in cell.source.splitlines() if not l.lstrip().startswith(("!", "%"))
-                    and "shutil.rmtree" not in l and "if d.exists()" not in l and "for d in (" not in l and "if PIPE_DIR.exists()" not in l]
-            cell.source = "# bootstrap clone/install skipped by execute_notebook_release.py --skip-bootstrap\n" + "\n".join(kept) + "\n"
+        if skip_bootstrap:
+            stripped, found = strip_bootstrap(cell.source)
+            if found:
+                cell.source = "# bootstrap region(s) dropped by execute_notebook_release.py --skip-bootstrap\n" + stripped
+                regions += found
         cell.source = cell.source.replace('"/content/', f'"{content_root}/')
+    if skip_bootstrap and not regions:
+        raise RuntimeError(f"{source.name}: --skip-bootstrap found no '# >>> colab-bootstrap' region; "
+                           "the notebook would re-clone and re-install over the staged checkout")
     return nb
 
 

@@ -5,6 +5,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TUTORIALS = ROOT / "tutorials"
+E2E = "tabpfn_classifier_colab.ipynb"
+ARTIFACT_INFERENCE = "tabpfn_classifier_artifact_inference_colab.ipynb"
+
+sys.path.insert(0, str(ROOT / "scripts"))
+from validate_colab_tutorial import strip_bootstrap  # noqa: E402
 
 
 def _load(name: str):
@@ -52,6 +57,31 @@ def test_artifact_inference_is_external_and_never_self_produces():
     assert "worker.run(" not in source
     assert "build_synthetic_dataset" not in source
     assert ".fit(" not in source
+
+
+def test_skip_bootstrap_drops_every_clone_and_install():
+    """The harness runs against a pre-staged checkout; nothing may re-clone or re-install over it."""
+    for name in (E2E, ARTIFACT_INFERENCE):
+        cell = next(c for c in _load(name)["cells"] if c["cell_type"] == "code")
+        stripped, regions = strip_bootstrap("".join(cell["source"]))
+        assert regions >= 1, f"{name}: no colab-bootstrap region"
+        for token in ("git clone", "pip install", "shutil.rmtree", "GITHUB_TOKEN"):
+            assert token not in stripped, f"{name}: {token!r} survives --skip-bootstrap"
+        compile(stripped, name, "exec")
+
+
+def test_skip_bootstrap_keeps_the_pinned_worker_identity():
+    cell = next(c for c in _load(E2E)["cells"] if c["cell_type"] == "code")
+    stripped, _ = strip_bootstrap("".join(cell["source"]))
+    assert "FT_COMMIT = COMPONENTS" in stripped
+    assert "PIPE_DIR = Path(" in stripped and "FT_DIR = Path(" in stripped
+
+
+def test_e2e_scores_rows_even_without_a_supplied_holdout():
+    """BYOD may supply only train.csv, which leaves val_df and test_df None."""
+    source = _source(_load(E2E))
+    assert "(test_df if test_df is not None else val_df)[FEATURES]" not in source
+    assert "source_df, source_label" in source and "source_df[FEATURES]" in source
 
 
 def test_requirements_colab_pins_everything():

@@ -7,4 +7,6 @@ pandas==2.3.2
 scikit-learn==1.9.0
 requests==2.32.5
 boto3==1.40.14
+# nbformat serves scripts/execute_notebook_release.py, not the notebooks; that harness also needs
+# nbclient and ipykernel, which are deliberately left to the executing environment.
 nbformat==5.10.4
