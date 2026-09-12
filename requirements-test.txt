@@ -1,4 +1,6 @@
 pandas==2.3.2
 scikit-learn==1.9.0
 pytest==8.4.1
+nbformat==5.10.4
+nbclient==0.11.0
 jsonschema==4.25.1
