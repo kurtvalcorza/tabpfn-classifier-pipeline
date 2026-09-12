@@ -1,7 +1,10 @@
+import importlib.util
 import json
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 TUTORIALS = ROOT / "tutorials"
@@ -10,6 +13,24 @@ ARTIFACT_INFERENCE = "tabpfn_classifier_artifact_inference_colab.ipynb"
 
 sys.path.insert(0, str(ROOT / "scripts"))
 from validate_colab_tutorial import strip_bootstrap  # noqa: E402
+
+
+def _harness():
+    spec = importlib.util.spec_from_file_location("harness", ROOT / "scripts" / "execute_notebook_release.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _manifest_digest():
+    """Lift manifest_digest() out of the E2E notebook and make it callable."""
+    cell = next(c for c in _load(E2E)["cells"]
+                if c["cell_type"] == "code" and "def manifest_digest" in "".join(c["source"]))
+    src = "".join(cell["source"])
+    body = src[src.index("def manifest_digest"):src.index("RELOAD = Path")]
+    namespace: dict = {}
+    exec(compile(body, "manifest_digest", "exec"), namespace)
+    return namespace["manifest_digest"]
 
 
 def _load(name: str):
@@ -82,6 +103,50 @@ def test_e2e_scores_rows_even_without_a_supplied_holdout():
     source = _source(_load(E2E))
     assert "(test_df if test_df is not None else val_df)[FEATURES]" not in source
     assert "source_df, source_label" in source and "source_df[FEATURES]" in source
+
+
+@pytest.mark.parametrize("manifest", [
+    {"fittedEstimator": "model.tabpfn_fit"},                      # no digest block at all
+    {"fittedEstimator": "model.tabpfn_fit", "sha256": None},      # block present but null
+    {"fittedEstimator": "model.tabpfn_fit", "sha256": {}},        # block present but empty
+    {"fittedEstimatorSha256": "short"},                           # flat shape, wrong length
+])
+def test_manifest_digest_refuses_a_missing_digest_by_value_error(manifest):
+    """A manifest without a usable digest must hit the guard, not a stray AttributeError."""
+    with pytest.raises(ValueError):
+        _manifest_digest()(manifest, "fittedEstimator")
+
+
+def test_manifest_digest_reads_both_worker_shapes():
+    digest = "a" * 64
+    assert _manifest_digest()({"fittedEstimatorSha256": digest}, "fittedEstimator") == digest
+    assert _manifest_digest()({"sha256": {"fittedEstimator": digest}}, "fittedEstimator") == digest
+
+
+def test_set_override_values_reach_the_kernel_as_literals():
+    """A bare word would otherwise be spliced in as a name and raise NameError mid-run."""
+    parse = _harness()._parse_overrides
+    assert parse(["FINE_TUNE=True"]) == {"FINE_TUNE": "True"}
+    assert parse(["EPOCHS=5"]) == {"EPOCHS": "5"}
+    assert parse(["MODEL_VERSION=v3"]) == {"MODEL_VERSION": "'v3'"}
+    for name, value in parse(["MODEL_VERSION=v3", "FINE_TUNE=True"]).items():
+        exec(f"{name} = {value}", {})  # must not raise NameError
+    with pytest.raises(SystemExit):
+        parse(["NOT_AN_ASSIGNMENT"])
+
+
+def test_set_override_that_matches_nothing_is_refused(tmp_path):
+    """A silently ignored override would record evidence for the value that actually ran."""
+    harness = _harness()
+    with pytest.raises(RuntimeError, match="matched no"):
+        harness._prepare(TUTORIALS / E2E, tmp_path, True, {"NO_SUCH_PARAM": "True"})
+
+
+def test_skip_bootstrap_applies_a_real_override(tmp_path):
+    nb = _harness()._prepare(TUTORIALS / E2E, tmp_path, True, {"FINE_TUNE": "True"})
+    source = "\n".join(c.source for c in nb.cells if c.cell_type == "code")
+    assert "FINE_TUNE = True  # @param" in source
+    assert "git clone" not in source and "pip install" not in source
 
 
 def test_requirements_colab_pins_everything():

@@ -8,8 +8,9 @@ same external-artifact boundary an interactive Colab user crosses with the uploa
 
 Disclosed substitutions, recorded in the evidence JSON:
 1. `/content/...` paths are rewritten to `<work>/content/...`.
-2. With `--skip-bootstrap`, every `# >>> colab-bootstrap` ... `# <<< colab-bootstrap` region and
-   every IPython `!`/`%` line is dropped; the executing
+2. With `--skip-bootstrap`, every `# >>> colab-bootstrap` ... `# <<< colab-bootstrap` region is
+   dropped, IPython `!`/`%` lines inside one included; lines outside a region are left alone.
+   The executing
    interpreter must already provide the lock set, and the worker is cloned by this script from
    `--finetuner-source` (a local path or URL) at the commit pinned in COMPONENTS.json, so the
    notebook's own pinned-commit check still runs against a real checkout.
@@ -19,6 +20,7 @@ Disclosed substitutions, recorded in the evidence JSON:
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import platform
@@ -66,11 +68,14 @@ def _prepare(source: Path, work: Path, skip_bootstrap: bool, overrides: dict[str
     nb = nbformat.read(source, as_version=4)
     content_root = (work / "content").as_posix()
     regions = 0
+    applied: set[str] = set()
     for cell in nb.cells:
         if cell.cell_type != "code":
             continue
         for name, value in overrides.items():  # only `NAME = ...  # @param` form lines are overridable
-            cell.source = re.sub(rf"^{name} = .*?(  # @param.*)$", lambda m, n=name, v=value: f"{n} = {v}{m.group(1)}", cell.source, flags=re.M)
+            cell.source, hits = re.subn(rf"^{name} = .*?(  # @param.*)$", lambda m, n=name, v=value: f"{n} = {v}{m.group(1)}", cell.source, flags=re.M)
+            if hits:
+                applied.add(name)
         if skip_bootstrap:
             stripped, found = strip_bootstrap(cell.source)
             if found:
@@ -80,6 +85,9 @@ def _prepare(source: Path, work: Path, skip_bootstrap: bool, overrides: dict[str
     if skip_bootstrap and not regions:
         raise RuntimeError(f"{source.name}: --skip-bootstrap found no '# >>> colab-bootstrap' region; "
                            "the notebook would re-clone and re-install over the staged checkout")
+    missed = sorted(set(overrides) - applied)
+    if missed:
+        raise RuntimeError(f"{source.name}: --set {missed} matched no `# @param` line; the run would silently record evidence for the unoverridden value")
     return nb
 
 
@@ -104,6 +112,26 @@ def _stage_repos(content: Path, finetuner_source: str) -> tuple[str, str]:
     return components["repository"], components["commit"]
 
 
+def _parse_overrides(items: list[str]) -> dict[str, str]:
+    """Turn NAME=VALUE into a substitutable Python literal.
+
+    The value is spliced into the notebook verbatim, so a bare word such as `v3` would reach the
+    kernel as a name and raise NameError mid-run. Anything that is not already a Python literal is
+    quoted as a string instead.
+    """
+    overrides: dict[str, str] = {}
+    for item in items:
+        name, sep, raw = item.partition("=")
+        if not sep or not name.isidentifier():
+            raise SystemExit(f"--set expects NAME=VALUE with NAME a Python identifier, got {item!r}")
+        try:
+            ast.literal_eval(raw)
+        except (ValueError, SyntaxError):
+            raw = repr(raw)
+        overrides[name] = raw
+    return overrides
+
+
 def make_genuinely_new_rows(path: Path, feature_columns: list[str], reference_csv: Path) -> pd.DataFrame:
     ref = pd.read_csv(reference_csv)
     numeric = ref[feature_columns].select_dtypes(include=np.number)
@@ -124,9 +152,11 @@ def main() -> int:
                         help="git URL or local path of the worker repository (checked out at the COMPONENTS.json commit)")
     parser.add_argument("--timeout", type=int, default=3600)
     parser.add_argument("--evidence", type=Path, default=None)
-    parser.add_argument("--set", action="append", default=[], metavar="NAME=VALUE", help="override a `# @param` form value in the E2E notebook, e.g. --set FINE_TUNE=True")
+    parser.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
+                        help="override a `# @param` form value, e.g. --set FINE_TUNE=True or --set MODEL_VERSION=v3. "
+                             "A value that is not a Python literal is substituted as a string.")
     args = parser.parse_args()
-    overrides = dict(item.split("=", 1) for item in args.set)
+    overrides = _parse_overrides(args.set)
 
     work = args.work.resolve(); content = work / "content"; content.mkdir(parents=True, exist_ok=True)
     site = _install_shim(work)

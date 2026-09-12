@@ -61,11 +61,14 @@ AI_FORBIDDEN = {
 COMMON_REQUIRED = {"supported Python floor": "Python 3.11+", "runtime Python guard": "sys.version_info < (3, 11)"}
 BOOTSTRAP_OPEN = "# >>> colab-bootstrap"
 BOOTSTRAP_CLOSE = "# <<< colab-bootstrap"
-SETUP_TOKENS = ("git clone", "pip install", "shutil.rmtree", "GITHUB_TOKEN")
+# Never legitimate outside a bootstrap region, in any cell.
+SETUP_TOKENS = ("git clone", "pip install", "GITHUB_TOKEN")
+# Legitimate elsewhere (dataset/output resets); only the clone-directory reset belongs in a region.
+BOOTSTRAP_ONLY_TOKENS = ("shutil.rmtree",)
 
 
 def strip_bootstrap(code: str) -> tuple[str, int]:
-    """Drop every `# >>> colab-bootstrap` ... `# <<< colab-bootstrap` region and every IPython line.
+    """Drop every `# >>> colab-bootstrap` ... `# <<< colab-bootstrap` region, IPython lines included.
 
     `scripts/execute_notebook_release.py --skip-bootstrap` applies exactly this rule so a notebook
     runs against an already-provisioned checkout and lock set. It lives in the validator so the
@@ -85,7 +88,7 @@ def strip_bootstrap(code: str) -> tuple[str, int]:
                 raise AssertionError("colab-bootstrap close without a matching open")
             inside = False
             continue
-        if inside or stripped.startswith(("!", "%")):
+        if inside:  # IPython `!`/`%` lines are dropped only as part of a region, never elsewhere
             continue
         kept.append(line)
     if inside:
@@ -146,10 +149,10 @@ def validate_notebook(nb_path: Path) -> None:
             raise AssertionError(f"Syntax error in {nb_path.name} (cell {idx}): {exc}") from exc
         without_bootstrap, found = strip_bootstrap(code)
         bootstrap_regions += found
+        for line in without_bootstrap.splitlines():
+            if any(token in line for token in SETUP_TOKENS + (BOOTSTRAP_ONLY_TOKENS if found else ())):
+                raise AssertionError(f"{nb_path.name} (cell {idx}): environment setup outside a colab-bootstrap region: {line.strip()}")
         if found:
-            for line in without_bootstrap.splitlines():
-                if any(token in line for token in SETUP_TOKENS):
-                    raise AssertionError(f"{nb_path.name} (cell {idx}): environment setup outside a colab-bootstrap region: {line.strip()}")
             try:
                 ast.parse(clean_code_for_ast(without_bootstrap), filename=f"{nb_path.name}:cell_{idx}:skip-bootstrap")
             except SyntaxError as exc:
