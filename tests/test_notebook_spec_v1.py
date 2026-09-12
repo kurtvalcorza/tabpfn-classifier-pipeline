@@ -31,6 +31,17 @@ def test_e2e_notebook_declares_and_exercises_release_profile():
     assert "does **not** establish" in source
 
 
+def test_e2e_private_source_bootstrap_is_ephemeral_and_fail_closed():
+    source = _source(_load("tabpfn_classifier_colab.ipynb"))
+    assert "GITHUB_TOKEN" in source
+    assert "GIT_CONFIG_KEY_0" in source
+    assert "http.https://github.com/.extraheader" in source
+    assert "x-access-token:{token}@github.com" not in source
+    assert "git config --global" not in source
+    assert "git config --local" not in source
+    assert "Private finetuner access requires" in source
+
+
 def test_artifact_inference_is_external_and_never_self_produces():
     nb = _load("tabpfn_classifier_artifact_inference_colab.ipynb")
     source = _source(nb)
