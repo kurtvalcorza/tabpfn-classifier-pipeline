@@ -19,7 +19,7 @@ jobs:
       - name: Lint
         run: ruff check .
       - name: Offline tests (no tabpfn, no torch, no weights)
-        run: PYTHONPATH=. pytest -q -m "not integration"
+        run: PYTHONPATH=src pytest -q -m "not integration"
       - name: Validate tutorials and model-card source (NOTEBOOK_SPEC 1.1 standalone)
         run: python tools/validate_release_assets.py
       - name: Standalone notebook parity (PAR3)
@@ -55,4 +55,4 @@ jobs:
           cache-dependency-path: requirements-test.txt
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
       - run: pip install tabpfn==8.1.0 -r requirements-test.txt
-      - run: PYTHONPATH=. pytest -q -m integration
+      - run: PYTHONPATH=src pytest -q -m integration
