@@ -5,5 +5,16 @@ __pycache__/
 .env
 tmp/
 *.zip
-# Local TabPFN base checkpoint — never committed; for the DIMER wizard upload or a local bake.
-weights/
+# Local TabPFN checkpoints are never committed (non-commercial weights; 200+ MB). The snapshot manifest,
+# config.json, LICENSE and README.md under weights/<model-key>/ are committable; weights/model.ckpt (the
+# re-serialised base checkpoint kept for the DIMER wizard upload) stays local.
+weights/*.ckpt
+weights/**/*.ckpt
+weights/**/*.safetensors
+weights/**/*.bin
+weights/**/*.pt
+weights/**/*.pth
+weights/**/*.onnx
+weights/**/.cache/
+.ruff_cache/
+outputs/

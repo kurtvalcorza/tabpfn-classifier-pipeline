@@ -14,9 +14,18 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: requirements-test.txt
-      - run: pip install -r requirements-test.txt
+      - run: pip install -r requirements-test.txt ruff==0.16.6 && pip install -e . --no-deps
       - run: python -m py_compile examples/build_synthetic_dataset.py serving/load_artifact.py
-      - run: PYTHONPATH=. pytest -q -m "not integration"
+      - name: Lint
+        run: ruff check .
+      - name: Offline tests (no tabpfn, no torch, no weights)
+        run: PYTHONPATH=. pytest -q -m "not integration"
+      - name: Validate tutorials and model-card source (NOTEBOOK_SPEC 1.1 standalone)
+        run: python tools/validate_release_assets.py
+      - name: Standalone notebook parity (PAR3)
+        run: |
+          python tools/build_notebook.py --check
+          python tools/build_notebook.py --check --template tools/notebook_template_artifact_inference.py
       - name: Validate component manifest
         run: |
           python - <<'PY'

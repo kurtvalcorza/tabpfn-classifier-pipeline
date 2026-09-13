@@ -1,0 +1,30 @@
+{
+  "format": "dimer_hf_snapshot",
+  "formatVersion": 1,
+  "modelKey": "tabpfn-3-classifier",
+  "modelId": "Prior-Labs/tabpfn_3",
+  "revision": "24a16a89d245878b846555110985634aa2e656d7",
+  "files": [
+    {
+      "path": "LICENSE",
+      "bytes": 16794,
+      "sha256": "dca491280b68f471312a15d54add7b8e724adf19fb0e113544b1ef91e060f5d5"
+    },
+    {
+      "path": "README.md",
+      "bytes": 8377,
+      "sha256": "53d61ea9bbf605c42892d13c53afb78e5ba8a6d1513d89db86736a620d3c9e81"
+    },
+    {
+      "path": "config.json",
+      "bytes": 33,
+      "sha256": "d9bc48f72a18bcbbb0a58dbe1ca7ac4123b9cfa1b7c0a79da5bcf3543cb32344"
+    },
+    {
+      "path": "tabpfn-v3-classifier-v3_default.ckpt",
+      "bytes": 212804803,
+      "sha256": "d0d865d54dfbc524f5703104be90620182dca7e5fb2c16de72e9959ea18f3988"
+    }
+  ],
+  "totalBytes": 212830007
+}
