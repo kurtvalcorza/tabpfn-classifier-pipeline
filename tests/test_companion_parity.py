@@ -1,4 +1,4 @@
-"""NOTEBOOK_SPEC 1.1 parity tests (PAR1–PAR3, ST1) for the ARTIFACT-INFERENCE companion notebook.
+"""NOTEBOOK_SPEC 2.0 parity tests (PAR1–PAR3, ST1) for the ARTIFACT-INFERENCE companion notebook.
 
 `tests/test_notebook_parity.py` is the fleet's copy and covers the primary template only; this file runs the
 same checks against `tools/notebook_template_artifact_inference.py` and the notebook it generates.

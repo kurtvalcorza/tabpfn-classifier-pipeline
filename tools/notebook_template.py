@@ -38,6 +38,13 @@ TEMPLATE = {
     "stem": "tabpfn_classifier",
     "notebook_name": "tabpfn_classifier_colab.ipynb",
     "profile": "TASK-INFERENCE",
+    "mode": "GUIDED",
+    "run_all": (
+        "Selecting **Run all** in a fresh supported runtime installs the pinned dependencies, stages and digest-verifies the pinned TabPFN-3 checkpoint (an ungated download; the TabPFN-3 licence's non-commercial terms still apply to what you do with it), draws the deterministic synthetic 3-class table in code (600 rows, 12 features, seeded `train`/`val`/`test` split, no download), validates it into an input manifest, **fits the classifier in context on the training split** (support-row registration on the pinned checkpoint — TabPFN has no gradient route in this pipeline), evaluates on the held-out split against a majority-class baseline and writes the evaluation report, exports the artifact bundle and reloads it across a fresh boundary, scores new rows, and exports machine-readable results and provenance. No repository clone, DIMER worker or service, credential, upload dialog or configuration edit is required (NOTEBOOK_SPEC 2.0 §5)."
+    ),
+    "byod": (
+        "Two optional branches, both off by default and never part of the default path: `USE_BYOD = True` (or `BYOD_ZIP_PATH`) in Section 4 supplies your own labelled table (a ZIP with `train.csv`/`val.csv`/`test.csv`, or a single `train.csv` that is split with a seeded stratified hold-out) which enters the same validation, in-context fitting, evaluation, export and fresh-reload cells as the synthetic sample; `USE_BYOD_ROWS = True` (or `NEW_DATA_PATH`) in Section 9 scores your own unlabelled rows with the reloaded estimator. Expected schema, ceilings and privacy guidance are stated in the Prerequisites and in those cells; uploads stay inside this runtime."
+    ),
     "pipeline_class": "TabPFNClassifierPipeline",
     "weights_key": "tabpfn-3-classifier",
     "runtime_imports": ["torch", "pandas", "sklearn"],

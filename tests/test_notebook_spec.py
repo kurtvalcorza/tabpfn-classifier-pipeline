@@ -1,4 +1,4 @@
-"""The standalone tutorial pair (NOTEBOOK_SPEC 1.1 §3.6): validator passes, profiles, pins, no worker path."""
+"""The standalone tutorial pair (NOTEBOOK_SPEC 2.0 §4): validator passes, profiles, pins, no worker path."""
 # ruff: noqa: E501
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def test_static_validator_passes() -> None:
 def test_profiles_and_standalone_metadata() -> None:
     for name, profile in ((TASK, "TASK-INFERENCE"), (ARTIFACT_INFERENCE, "ARTIFACT-INFERENCE")):
         dimer = _load(name)["metadata"]["dimer"]
-        assert dimer["notebook_profile"] == profile and dimer["notebook_spec"] == "1.1" and dimer["standalone"] is True
+        assert dimer["notebook_profile"] == profile and dimer["notebook_spec"] == "2.0" and dimer["standalone"] is True
         assert dimer["generated_from"]["repository"] == "tabpfn-classifier-pipeline" and dimer["generated_from"]["module"] == "src/tabpfn_classifier_pipeline/pipeline.py"
 
 
