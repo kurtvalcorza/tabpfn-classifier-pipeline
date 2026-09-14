@@ -23,3 +23,7 @@ These are platform requirements only; they are **not implemented in this reposit
 **DIMER integration requirement (not implemented in this repository):** DIMER export/promotion/serving should preserve and validate the complete TabPFN portable model bundle rather than treating the fitted estimator alone as self-contained.
 
 **DIMER integration requirement (not implemented in this repository):** Workbench activation should eventually validate registered pipeline parameters/result protocol against the versioned worker contract before activation.
+
+## AI Assistance Disclosure
+
+This tutorial and its accompanying documentation were developed with generative AI assistance for code development and technical writing under maintainer direction. The maintainer remains responsible for reviewing the implementation, validating results, and making release decisions. AI assistance does not constitute independent verification, provider endorsement, or release approval.
