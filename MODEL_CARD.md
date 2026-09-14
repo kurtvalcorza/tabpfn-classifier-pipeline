@@ -21,11 +21,11 @@ date_published_source: "Hugging Face Hub repository creation date of the exact h
 [![arXiv Paper](https://img.shields.io/badge/arXiv-2605.13986-b31b1b.svg)](https://arxiv.org/abs/2605.13986)
 [![License: TabPFN-3 License v1.0](https://img.shields.io/badge/License-TabPFN--3%20License%20v1.0-blue.svg)](https://huggingface.co/Prior-Labs/tabpfn_3/blob/24a16a89d245878b846555110985634aa2e656d7/LICENSE)
 
-> [!WARNING]
+> [!IMPORTANT]
 > The TABPFN-3 Model is licensed by Prior Labs GmbH under the TABPFN-3 Non-Commercial License.  
-> Copyright © Prior Labs GmbH 2026.  
->  THE SERVICES ARE PROVIDED FREE OF CHARGE: COMPANY SHALL NOT BE LIABLE FOR DAMAGES RESULTING FROM SLIGHT NEGLIGENCE. LIABILITY FOR GROSS NEGLIGENCE AND INTENTIONAL MISCONDUCT REMAINS UNAFFECTED.
->
+> Copyright © Prior Labs GmbH 2026. THE SERVICES ARE PROVIDED FREE OF CHARGE: COMPANY SHALL NOT BE LIABLE FOR DAMAGES RESULTING FROM SLIGHT NEGLIGENCE. LIABILITY FOR GROSS NEGLIGENCE AND INTENTIONAL MISCONDUCT REMAINS UNAFFECTED.
+
+> [!WARNING]
 > ⚠️ **Provided for research, training, and evaluation purposes only.** Model weights are hosted and redistributed unmodified under their upstream non-commercial license (`TABPFN-3 License v1.0`), which strictly controls your use (non-commercial research, benchmarking, evaluation, and data science competitions only; commercial production, client deliverables, revenue-generating activities, and hosted SaaS inference services are strictly prohibited without a commercial license from Prior Labs GmbH). Outputs may not be used to train, fine-tune, or distill competitive tabular models. The accompanying code and notebooks are released under this repository's license. All of it is supplied **"as is"**, without warranty of any kind, and has not been validated for production, clinical, or safety-critical use. Running the notebooks downloads third-party weights and datasets governed by their own licenses and consumes compute on your own Colab/Kaggle account. To the maximum extent permitted by law, the maintainers of this repository and the DIMER platform accept no liability for any damages arising from their use. Hosting implies no affiliation with or endorsement by the original authors.
 
 ---
