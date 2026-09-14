@@ -22,7 +22,11 @@ date_published_source: "Hugging Face Hub repository creation date of the exact h
 [![License: TabPFN-3 License v1.0](https://img.shields.io/badge/License-TabPFN--3%20License%20v1.0-blue.svg)](https://huggingface.co/Prior-Labs/tabpfn_3/blob/24a16a89d245878b846555110985634aa2e656d7/LICENSE)
 
 > [!WARNING]
-> ⚠️ **Provided for research, training, and evaluation purposes only.** Model weights are redistributed unmodified under their upstream license, which controls your use, including any commercial use or redistribution; the accompanying code and notebooks are released under this repository's license. All of it is supplied **"as is"**, without warranty of any kind, and has not been validated for production, clinical, or safety-critical use. Running the notebooks downloads third-party weights and datasets governed by their own licenses and consumes compute on your own Colab/Kaggle account. To the maximum extent permitted by law, the maintainers of this repository and the DIMER platform accept no liability for any damages arising from their use. Hosting implies no affiliation with or endorsement by the original authors.
+> The TABPFN-3 Model is licensed by Prior Labs GmbH under the TABPFN-3 Non-Commercial License.  
+> Copyright © Prior Labs GmbH 2026.  
+>  THE SERVICES ARE PROVIDED FREE OF CHARGE: COMPANY SHALL NOT BE LIABLE FOR DAMAGES RESULTING FROM SLIGHT NEGLIGENCE. LIABILITY FOR GROSS NEGLIGENCE AND INTENTIONAL MISCONDUCT REMAINS UNAFFECTED.
+>
+> ⚠️ **Provided for research, training, and evaluation purposes only.** Model weights are hosted and redistributed unmodified under their upstream non-commercial license (`TABPFN-3 License v1.0`), which strictly controls your use (non-commercial research, benchmarking, evaluation, and data science competitions only; commercial production, client deliverables, revenue-generating activities, and hosted SaaS inference services are strictly prohibited without a commercial license from Prior Labs GmbH). Outputs may not be used to train, fine-tune, or distill competitive tabular models. The accompanying code and notebooks are released under this repository's license. All of it is supplied **"as is"**, without warranty of any kind, and has not been validated for production, clinical, or safety-critical use. Running the notebooks downloads third-party weights and datasets governed by their own licenses and consumes compute on your own Colab/Kaggle account. To the maximum extent permitted by law, the maintainers of this repository and the DIMER platform accept no liability for any damages arising from their use. Hosting implies no affiliation with or endorsement by the original authors.
 
 ---
 
@@ -240,20 +244,25 @@ The pipeline exposes estimator/context budgets and caps evaluation prediction ba
 
 ## Licensing — deployment gate
 
-The deployment team must review the **exact model checkpoint license**, not only the Python package source license.
+The upstream TabPFN-3 model weights are licensed by Prior Labs GmbH under the **TABPFN-3 Non-Commercial License** (`TABPFN-3 License v1.0`, March 24, 2026).
 
-As of this pipeline's initial implementation (August 2026), Prior Labs documentation distinguishes:
+Attribution Notice (pursuant to Section 3.b):
+```text
+The TABPFN-3 Model is licensed by Prior Labs GmbH under the TABPFN-3 Non-Commercial License.
+Copyright © Prior Labs GmbH 2026.
+ THE SERVICES ARE PROVIDED FREE OF CHARGE: COMPANY SHALL NOT BE LIABLE FOR DAMAGES RESULTING FROM SLIGHT NEGLIGENCE. LIABILITY FOR GROSS NEGLIGENCE AND INTENTIONAL MISCONDUCT REMAINS UNAFFECTED.
+```
 
-- TabPFN code and TabPFN-2 weights: Prior Labs' Apache-derived license with an additional attribution provision.
-- TabPFN-2.5, TabPFN-2.6, and TabPFN-3 weights: non-commercial model-weight terms.
-
-Because this pipeline defaults to TabPFN-3, **production or externally offered DIMER service use must be cleared against those model-weight terms before enablement**. If the intended deployment falls outside the permitted scope, use an appropriately licensed checkpoint/model generation or obtain the necessary rights.
+**DIMER Hosting & Usage Boundaries:**
+- **Permitted Use (Section 1.c, 2.a):** Model weights are hosted in the DIMER Model Repository for offline distribution, research, benchmarking, evaluation, experimentation, and public data science competitions.
+- **Hosted Service Prohibition (Section 3.d):** Under Section 3.d (*No Hosted Service*), the TABPFN-3 Model or any Derivative may **not** be distributed, hosted, or made available as part of a hosted, managed, API, or SaaS service (whether paid or free) without a separate commercial license from Prior Labs GmbH (`sales@priorlabs.ai`).
+- **Output Restrictions (Section 2.d):** Model outputs are restricted to non-commercial purposes and may not be used in production systems, client deliverables, commercial research services, or to train, fine-tune, or distill any model competitive with TabPFN.
+- **Derivatives & Fine-Tuning (Section 3.c):** Any distribution of fine-tuned weights or derivatives produced by this pipeline must include an Attribution Notice stating that the model has been modified and disclaiming endorsement or approval by Prior Labs GmbH.
 
 Upstream references:
-
+- License text: `https://huggingface.co/Prior-Labs/tabpfn_3/resolve/main/LICENSE`
 - Prior Labs TabPFN repository: `https://github.com/PriorLabs/TabPFN`
-- TabPFN documentation: `https://docs.priorlabs.ai/`
-- Model licensing: `https://docs.priorlabs.ai/faq#licensing`
+- Commercial inquiries: `sales@priorlabs.ai`
 
 ## Data governance
 
