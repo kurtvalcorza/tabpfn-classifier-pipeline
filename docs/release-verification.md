@@ -104,7 +104,7 @@ download; they are measurements for the stated runtime, not general estimates.
 
 | Date (UTC) | Commit / notebook blob | Executor | Path exercised | Wall | Outcome |
 |---|---|---|---|---|---|
-| | | | Task inference, default sample path | | pending — queued to the executor lane |
+| 2026-09-14 | `1d93609` / `ccdcd20093ed` | Kaggle CPU (`kurtvalcorza/dimer-nb2-tabpfn-classifier` v1) | Default sample path | 203.5 s | **PASSED** — 10/10 ok code cells executed cleanly, 10 files, 213 MB staged |
 | | | | Artifact inference, bundle from the run above | | pending — queued to the executor lane |
 
 ### History: previous (worker-driven, NOTEBOOK_SPEC 1.0) notebook pair
