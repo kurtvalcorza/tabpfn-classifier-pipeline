@@ -13,7 +13,7 @@ date_published: "2026-05-05"
 date_published_source: "Hugging Face Hub repository creation date of the exact hosted checkpoint (`createdAt`, https://huggingface.co/api/models/Prior-Labs/tabpfn_3)"
 ---
 
-# TabPFN-3 Classifier (tabpfn 8.1.0)
+# TabPFN-3 Classifier
 
 
 #### Description
