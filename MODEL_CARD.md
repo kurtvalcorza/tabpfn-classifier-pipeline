@@ -13,8 +13,34 @@ date_published: "2026-05-05"
 date_published_source: "Hugging Face Hub repository creation date of the exact hosted checkpoint (`createdAt`, https://huggingface.co/api/models/Prior-Labs/tabpfn_3)"
 ---
 
-# TabPFN-3 Classifier
+# TabPFN-3 Classifier — Tabular Foundation Model (Classification)
 
+[![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Prior--Labs%2Ftabpfn__3-ffcc4d?style=flat)](https://huggingface.co/Prior-Labs/tabpfn_3)
+[![Upstream GitHub](https://img.shields.io/badge/Upstream%20GitHub-PriorLabs%2FTabPFN-181717?style=flat&logo=github&logoColor=white)](https://github.com/PriorLabs/TabPFN)
+[![arXiv Paper](https://img.shields.io/badge/arXiv-2605.13986-b31b1b.svg)](https://arxiv.org/abs/2605.13986)
+[![License: TabPFN-3 License v1.0](https://img.shields.io/badge/License-TabPFN--3%20License%20v1.0-blue.svg)](https://huggingface.co/Prior-Labs/tabpfn_3/blob/24a16a89d245878b846555110985634aa2e656d7/LICENSE)
+
+> [!WARNING]
+> ⚠️ **Provided for research, training, and evaluation purposes only.** Model weights are redistributed unmodified under their upstream license, which controls your use, including any commercial use or redistribution; the accompanying code and notebooks are released under this repository's license. All of it is supplied **"as is"**, without warranty of any kind, and has not been validated for production, clinical, or safety-critical use. Running the notebooks downloads third-party weights and datasets governed by their own licenses and consumes compute on your own Colab/Kaggle account. To the maximum extent permitted by law, the maintainers of this repository and the DIMER platform accept no liability for any damages arising from their use. Hosting implies no affiliation with or endorsement by the original authors.
+
+---
+
+## Interactive Colab Tutorials
+
+This repository ships standalone Google Colab tutorials that exercise its public pipeline API:
+
+- **Task Inference Tutorial**: \
+  [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/kurtvalcorza/tabpfn-classifier-pipeline/blob/main/tutorials/tabpfn_classifier_colab.ipynb) [`tabpfn_classifier_colab.ipynb`](https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/blob/main/tutorials/tabpfn_classifier_colab.ipynb) \
+  *Verify the pinned TabPFN-3 checkpoint, validate a synthetic or uploaded labelled table, fit in context, evaluate against an executable constant baseline, and export and reload the serving artifact before scoring new rows.*
+
+- **Serving Artifact Inference Tutorial**: \
+  [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/kurtvalcorza/tabpfn-classifier-pipeline/blob/main/tutorials/tabpfn_classifier_artifact_inference_colab.ipynb) [`tabpfn_classifier_artifact_inference_colab.ipynb`](https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/blob/main/tutorials/tabpfn_classifier_artifact_inference_colab.ipynb) \
+  *Validate an externally supplied serving bundle before reconstruction, load the saved estimator without refitting, validate new unlabelled rows, and export class labels and probabilities with provenance.*
+
+> [!NOTE]
+> Both notebooks perform in-context inference without gradient fine-tuning. These tutorials remain release candidates; see [release verification](docs/release-verification.md) for execution records and promotion requirements.
+
+---
 
 #### Description
 
