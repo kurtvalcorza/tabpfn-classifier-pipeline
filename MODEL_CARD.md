@@ -49,13 +49,13 @@ This repository ships standalone Google Colab tutorials that exercise its public
 
 #### Description
 
-TabPFN Classifier packages Prior Labs' TabPFN (Tabular Prior-data Fitted Network) through the `tabpfn==8.1.0` package, with the TabPFN-3 generation selected by default (`model_version: v3`) and v2, v2.5, and v2.6 selectable through DIMER configuration. TabPFN is a Transformer trained on a prior over synthetic tabular tasks so that it performs supervised classification in a single forward pass: the labelled training rows are the in-context support, the query rows attend to them, and the head emits class probabilities. The v3 checkpoint's stored inference config admits up to 1,000,000 samples, 2,000 features, and 160 classes; the earlier generations are narrower.
+TabPFN Classifier packages Prior Labs' TabPFN (Tabular Prior-data Fitted Network) through the `tabpfn==8.1.0` package, with the TabPFN-3 generation selected by default (`model_version: v3`) and v2, v2.5, and v2.6 selectable through configuration. TabPFN is a Transformer trained on a prior over synthetic tabular tasks so that it performs supervised classification in a single forward pass: the labelled training rows are the in-context support, the query rows attend to them, and the head emits class probabilities. The v3 checkpoint's stored inference config admits up to 1,000,000 samples, 2,000 features, and 160 classes; the earlier generations are narrower.
 
-At inference the model conditions on the operator's training table; adaptation happens through in-context conditioning by default and, when `fine_tune=true` and a CUDA GPU is present, through gradient fine-tuning with Prior Labs' `FinetunedTabPFNClassifier` on explicit train and validation sets. What this repository adds is the DIMER composition: the pipeline contract (`dimer-pipeline.json`, `CONTRACT.md`), the component manifest pinning the validator and fine-tuner commits (`COMPONENTS.json`), an artifact loader for serving (`serving/load_artifact.py`), tests, and a synthetic example builder; the validator and fine-tuner workers live in the sibling `tabpfn-classifier-dataset-validator` and `tabpfn-classifier-finetuner` repositories. The upstream weights are not modified by this repository.
+At inference the model conditions on the operator's training table; adaptation happens through in-context conditioning by default and, when `fine_tune=true` and a CUDA GPU is present, through gradient fine-tuning with Prior Labs' `FinetunedTabPFNClassifier` on explicit train and validation sets. What this repository adds is the DIMER composition: the pipeline contract (`dimer-pipeline.json`, `CONTRACT.md`), the component manifest pinning the validator and fine-tuner commits (`COMPONENTS.json`), an artifact loader for serving (`serving/load_artifact.py`), tests, and a synthetic example builder; the validator and fine-tuner live in the sibling `tabpfn-classifier-dataset-validator` and `tabpfn-classifier-finetuner` repositories. The upstream weights are not modified by this repository.
 
 #### Intended Use and Limitations
 
-The use cases below are the ones envisioned during development; the limits are the ones the workers enforce.
+The use cases below are the ones envisioned during development; the limits are the ones the pipeline enforces.
 
 ###### Primary Intended Uses
 
@@ -65,7 +65,7 @@ Concrete application domains envisioned during development: binary and multiclas
 
 ###### Primary Intended Users
 
-Machine-learning engineers, data scientists, and researchers building predictive systems from structured datasets, and DIMER integrators provisioning the workers. The envisioned deployment setting is internal enterprise or research use through the DIMER platform — CPU by default, GPU opt-in — and, because `tabpfn-3-license-v1.0` limits the TabPFN-3 weights to a Non-Commercial Purpose that its own definition says excludes production deployment and revenue generation, testing and evaluation only until a production enablement has been cleared against those terms.
+Machine-learning engineers, data scientists, and researchers building predictive systems from structured datasets. The envisioned deployment setting is internal enterprise or research use through the DIMER platform — CPU by default, GPU opt-in — and, because `tabpfn-3-license-v1.0` limits the TabPFN-3 weights to a Non-Commercial Purpose that its own definition says excludes production deployment and revenue generation, testing and evaluation only until a production enablement has been cleared against those terms.
 
 The pipeline assumes its users understand dataset provenance, holdout evaluation, leakage, class imbalance, and distribution shift; know that `predict()` is an argmax over class probabilities not calibrated for their domain; can read `metrics.fineTuneEffective` to tell a fine-tuned run from a zero-shot fallback; and understand that random stratified splitting is wrong for temporal or grouped data, where they must supply explicit splits. A user who would ship a zero-shot fallback believing it was fine-tuned is outside the assumed competency.
 
@@ -131,15 +131,15 @@ Fine-tuned weights may encode information derived from the uploaded dataset, so 
 
 ###### Human Life
 
-The pipeline is not intended for decisions in health care, physical safety, criminal justice, legal rights, employment, credit, insurance, education access, or public benefits, and it has not been validated for any of them. The only validation performed is the contract and integration testing in `tests/` (CPU CI, which does not exercise GPU fine-tuning or production serving) and the DIMER holdout evaluation on the operator's own table; no clinical, regulatory, or independent domain validation has been carried out by the developers or by any external body.
+The pipeline is not intended for decisions in health care, physical safety, criminal justice, legal rights, employment, credit, insurance, education access, or public benefits, and it has not been validated for any of them. The only validation performed is the contract and integration testing in `tests/` (CPU CI, which does not exercise GPU fine-tuning or production serving) and the holdout evaluation on the operator's own table; no clinical, regulatory, or independent domain validation has been carried out by the developers or by any external body.
 
 Where such a use is foreseeable — a triage classifier on a clinical feature table, for example — it would be admissible only with independent domain validation on that operator's population, a human decision-maker between the prediction and the action, subgroup evaluation, and whatever regulatory clearance the domain requires.
 
 ###### Mitigations
 
-Implemented in the composed workers, each inspectable in the named code:
+Implemented in the fine-tuner and validator, each inspectable in the named code:
 
-- **Supply-chain integrity:** `tabpfn` is pinned to 8.1.0 and the component commits are pinned in `COMPONENTS.json`. The selected generation is explicit (`model_version`) and a mismatch between the DIMER-resolved and requested version raises `MODEL_IDENTITY_MISMATCH`. When DIMER mounts an approved checkpoint through `DIMER_TABPFN_MODEL_PATH`, its SHA-256 is recorded and, if the model config carries `expectedSha256`, a mismatch raises `MODEL_INTEGRITY_FAILED`. Without a mounted checkpoint the package's cached weights are used and only their digest is recorded — that path is not pinned, and the card says so.
+- **Supply-chain integrity:** `tabpfn` is pinned to 8.1.0 and the component commits are pinned in `COMPONENTS.json`. The selected generation is explicit (`model_version`) and a mismatch between the DIMER-resolved and requested version raises `MODEL_IDENTITY_MISMATCH`. When an approved checkpoint is mounted through `DIMER_TABPFN_MODEL_PATH`, its SHA-256 is recorded and, if the model config carries `expectedSha256`, a mismatch raises `MODEL_INTEGRITY_FAILED`. Without a mounted checkpoint the package's cached weights are used and only their digest is recorded — that path is not pinned, and the card says so.
 - **Input integrity:** the validator enforces the selected generation's row, feature, and class caps and writes `classNames` on every result; `test.csv` is isolated from fine-tuning, early stopping, and checkpoint selection.
 - **Statistical mitigations:** stratified splitting and capping keep every class represented; evaluation prediction is chunked to bound memory.
 - **Reproducibility:** `seed` propagates to Python, NumPy, torch, and the estimators; the artifact manifest records target column, ordered feature columns, class labels, and per-artifact SHA-256; the dataset fingerprint is recorded.
@@ -170,7 +170,7 @@ Distinct from the capability and decision boundaries listed under *Out-of-scope 
 
 **TabPFN** (Tabular Prior-data Fitted Network), maintained by Prior Labs.
 
-This pipeline defaults to the TabPFN-3 generation through `tabpfn==8.1.0`. The selected generation is explicit in DIMER configuration (`model_version`) rather than inferred from whatever checkpoint happens to be cached.
+This pipeline defaults to the TabPFN-3 generation through `tabpfn==8.1.0`. The selected generation is explicit in configuration (`model_version`) rather than inferred from whatever checkpoint happens to be cached.
 
 ## Intended task
 
@@ -192,7 +192,7 @@ When `fine_tune=false`, the pipeline uses `TabPFNClassifier` directly. `.fit(X, 
 
 ## Version pinning
 
-The standalone tutorials (`tutorials/tabpfn_classifier_colab.ipynb`, `tutorials/tabpfn_classifier_artifact_inference_colab.ipynb`; DIMER Notebook Specification 1.1 §3.6, generated by `tools/build_notebook.py`) pin the v3 checkpoint `tabpfn-v3-classifier-v3_default.ckpt` of `Prior-Labs/tabpfn_3` at immutable revision `24a16a89d245878b846555110985634aa2e656d7` (SHA-256 `d0d865d54dfbc524f5703104be90620182dca7e5fb2c16de72e9959ea18f3988`, 212804803 bytes; `weights/tabpfn-3-classifier/dimer-base-manifest.json`, `docs/WEIGHTS.md`) and run in-context inference only — the private fine-tuner worker and its gradient path are not carried, and the non-commercial `tabpfn-3-license-v1.0` limits those notebooks to testing and evaluation. Static source validation is `tools/validate_release_assets.py`; the clean-runtime execution record that gates promotion is `docs/release-verification.md`.
+The standalone tutorials (`tutorials/tabpfn_classifier_colab.ipynb`, `tutorials/tabpfn_classifier_artifact_inference_colab.ipynb`; DIMER Notebook Specification 1.1 §3.6, generated by `tools/build_notebook.py`) pin the v3 checkpoint `tabpfn-v3-classifier-v3_default.ckpt` of `Prior-Labs/tabpfn_3` at immutable revision `24a16a89d245878b846555110985634aa2e656d7` (SHA-256 `d0d865d54dfbc524f5703104be90620182dca7e5fb2c16de72e9959ea18f3988`, 212804803 bytes; `weights/tabpfn-3-classifier/dimer-base-manifest.json`, `docs/WEIGHTS.md`) and run in-context inference only — the private fine-tuner and its gradient path are not carried, and the non-commercial `tabpfn-3-license-v1.0` limits those notebooks to testing and evaluation. Static source validation is `tools/validate_release_assets.py`; the clean-runtime execution record that gates promotion is `docs/release-verification.md`.
 
 Container dependency:
 
@@ -238,7 +238,7 @@ A provided `test.csv` is not passed to fine-tuning, early stopping, checkpoint s
 
 ## Resource considerations
 
-Fine-tuning TabPFN is substantially more memory-intensive than ordinary sklearn-style estimators. Prior Labs' official fine-tuning example recommends an 80 GB CUDA GPU. Treat that as the initial DIMER provisioning profile, then reduce resources only after recording real peak-memory and runtime measurements for representative datasets.
+Fine-tuning TabPFN is substantially more memory-intensive than ordinary sklearn-style estimators. Prior Labs' official fine-tuning example recommends an 80 GB CUDA GPU. Treat that as the initial provisioning profile, then reduce resources only after recording real peak-memory and runtime measurements for representative datasets.
 
 The pipeline exposes estimator/context budgets and caps evaluation prediction batches to reduce avoidable memory spikes, but these controls do not guarantee that every dataset will fit a smaller GPU.
 
@@ -253,7 +253,7 @@ Copyright © Prior Labs GmbH 2026.
  THE SERVICES ARE PROVIDED FREE OF CHARGE: COMPANY SHALL NOT BE LIABLE FOR DAMAGES RESULTING FROM SLIGHT NEGLIGENCE. LIABILITY FOR GROSS NEGLIGENCE AND INTENTIONAL MISCONDUCT REMAINS UNAFFECTED.
 ```
 
-**DIMER Hosting & Usage Boundaries:**
+**Hosting & Usage Boundaries:**
 - **Permitted Use (Section 1.c, 2.a):** Model weights are hosted in the DIMER Model Repository for offline distribution, research, benchmarking, evaluation, experimentation, and public data science competitions.
 - **Hosted Service Prohibition (Section 3.d):** Under Section 3.d (*No Hosted Service*), the TABPFN-3 Model or any Derivative may **not** be distributed, hosted, or made available as part of a hosted, managed, API, or SaaS service (whether paid or free) without a separate commercial license from Prior Labs GmbH (`sales@priorlabs.ai`).
 - **Output Restrictions (Section 2.d):** Model outputs are restricted to non-commercial purposes and may not be used in production systems, client deliverables, commercial research services, or to train, fine-tune, or distill any model competitive with TabPFN.
@@ -275,4 +275,4 @@ Do not upload data to DIMER unless its processing and model-training use are aut
 - Performance is dataset-dependent; TabPFN benchmark strength is not a guarantee of task-level superiority.
 - High-cardinality categoricals, unusual missingness, distribution shift, leakage, and non-independent rows can invalidate apparently strong holdout scores.
 - Random stratified splitting is appropriate for exchangeable classification rows but not for temporal forecasting, grouped/patient-level leakage scenarios, or other datasets requiring group/time-aware validation. In those cases, provide an explicit `val.csv` and `test.csv` constructed with the correct domain split.
-- The DIMER serving layer must be tested against the actual `model.tabpfn_fit` artifact before the pipeline is considered ready for production.
+- The serving layer must be tested against the actual `model.tabpfn_fit` artifact before the pipeline is considered ready for production.
