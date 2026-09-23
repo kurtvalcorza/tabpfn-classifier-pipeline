@@ -51,7 +51,7 @@ This repository ships standalone Google Colab tutorials that exercise its public
 
 TabPFN Classifier packages Prior Labs' TabPFN (Tabular Prior-data Fitted Network) through the `tabpfn==8.1.0` package, with the TabPFN-3 generation selected by default (`model_version: v3`) and v2, v2.5, and v2.6 selectable through configuration. TabPFN is a Transformer trained on a prior over synthetic tabular tasks so that it performs supervised classification in a single forward pass: the labelled training rows are the in-context support, the query rows attend to them, and the head emits class probabilities. The v3 checkpoint's stored inference config admits up to 1,000,000 samples, 2,000 features, and 160 classes; the earlier generations are narrower.
 
-At inference the model conditions on the operator's training table; adaptation happens through in-context conditioning by default and, when `fine_tune=true` and a CUDA GPU is present, through gradient fine-tuning with Prior Labs' `FinetunedTabPFNClassifier` on explicit train and validation sets. What this repository adds is the DIMER composition: the pipeline contract (`dimer-pipeline.json`, `CONTRACT.md`), the component manifest pinning the validator and fine-tuner commits (`COMPONENTS.json`), an artifact loader for serving (`serving/load_artifact.py`), tests, and a synthetic example builder. The upstream weights are not modified by this repository.
+At inference the model conditions on the operator's training table; adaptation happens through in-context conditioning by default and, when `fine_tune=true` and a CUDA GPU is present, through gradient fine-tuning with Prior Labs' `FinetunedTabPFNClassifier` on explicit train and validation sets. What this repository adds is the code around the weights: the pipeline contract (`dimer-pipeline.json`, `CONTRACT.md`), the component manifest pinning the validator and fine-tuner commits (`COMPONENTS.json`), an artifact loader for serving (`serving/load_artifact.py`), tests, and a synthetic example builder. The upstream weights are not modified by this repository.
 
 #### Intended Use and Limitations
 
@@ -61,7 +61,7 @@ The use cases below are the ones envisioned during development; the limits are t
 
 Supervised classification of tabular data where each observation is one row of mixed numeric and categorical predictor columns and one categorical target. The pipeline takes a `train.csv` (optionally `val.csv`/`test.csv`) with a declared target column and produces a fitted TabPFN artifact pair (`model.tabpfn_fit` + `model.ckpt`), per-row class labels and class probabilities, and holdout metrics.
 
-Concrete application domains envisioned during development: binary and multiclass classification for risk categorisation, quality grading, churn and event prediction, and scientific classification on feature tables of small to medium size, where the operator wants strong performance without hyperparameter search. The pipeline is meant to play the role of a strong zero-shot baseline, or a fine-tuned model when a GPU is available, inside DIMER. Enforced ceilings follow the selected generation (v3: 1,000,000 rows, 2,000 features, 160 classes; v2: 10,000 / 500 / 10), further capped by the DIMER `max_train_rows` preprocessing argument. A provided `test.csv` is used only for post-fit evaluation, never for early stopping or checkpoint selection.
+Concrete application domains envisioned during development: binary and multiclass classification for risk categorisation, quality grading, churn and event prediction, and scientific classification on feature tables of small to medium size, where the operator wants strong performance without hyperparameter search. The pipeline is meant to play the role of a strong zero-shot baseline, or a fine-tuned model when a GPU is available. Enforced ceilings follow the selected generation (v3: 1,000,000 rows, 2,000 features, 160 classes; v2: 10,000 / 500 / 10), further capped by the `max_train_rows` preprocessing argument. A provided `test.csv` is used only for post-fit evaluation, never for early stopping or checkpoint selection.
 
 ###### Primary Intended Users
 
@@ -117,7 +117,7 @@ No probability cutoff is applied, and none is shipped, because the emitted proba
 
 The pipeline's reported metrics come from a single validation split (a stratified random holdout when `val.csv` is absent) and, when supplied, a single `test.csv`. No dispersion is reported alongside the point value: one split, one run, no confidence interval. Operators who need one should repeat the run across seeds or use cross-validation on their own side.
 
-Sources of run-to-run variability: the holdout split, the training cap, TabPFN's internal estimator ensembling (`n_estimators_finetune`, `n_estimators_validation`, `n_estimators_final_inference`, defaults 2/2/8), and gradient fine-tuning; all are driven by the DIMER `seed` hyperparameter, which `_seed_everything` propagates to Python, NumPy, and torch (including CUDA) and which is passed as `random_state` to the estimators. Non-deterministic CUDA kernels can still produce small differences. The class probabilities are raw ensemble-averaged outputs and have not been calibrated; a caller who needs calibrated probabilities must fit a calibrator on their own holdout data. A zero-shot fallback run and a fine-tuned run are different estimators and their metrics must not be compared as if from the same procedure — `fineTuneEffective` says which one ran.
+Sources of run-to-run variability: the holdout split, the training cap, TabPFN's internal estimator ensembling (`n_estimators_finetune`, `n_estimators_validation`, `n_estimators_final_inference`, defaults 2/2/8), and gradient fine-tuning; all are driven by the `seed` hyperparameter, which `_seed_everything` propagates to Python, NumPy, and torch (including CUDA) and which is passed as `random_state` to the estimators. Non-deterministic CUDA kernels can still produce small differences. The class probabilities are raw ensemble-averaged outputs and have not been calibrated; a caller who needs calibrated probabilities must fit a calibrator on their own holdout data. A zero-shot fallback run and a fine-tuned run are different estimators and their metrics must not be compared as if from the same procedure — `fineTuneEffective` says which one ran.
 
 #### Ethical considerations and biases
 
@@ -139,7 +139,7 @@ Where such a use is foreseeable — a triage classifier on a clinical feature ta
 
 Implemented in the fine-tuner and validator, each inspectable in the named code:
 
-- **Supply-chain integrity:** `tabpfn` is pinned to 8.1.0 and the component commits are pinned in `COMPONENTS.json`. The selected generation is explicit (`model_version`) and a mismatch between the DIMER-resolved and requested version raises `MODEL_IDENTITY_MISMATCH`. When an approved checkpoint is mounted through `DIMER_TABPFN_MODEL_PATH`, its SHA-256 is recorded and, if the model config carries `expectedSha256`, a mismatch raises `MODEL_INTEGRITY_FAILED`. Without a mounted checkpoint the package's cached weights are used and only their digest is recorded — that path is not pinned, and the card says so.
+- **Supply-chain integrity:** `tabpfn` is pinned to 8.1.0 and the component commits are pinned in `COMPONENTS.json`. The selected generation is explicit (`model_version`) and a mismatch between the resolved and requested version raises `MODEL_IDENTITY_MISMATCH`. When an approved checkpoint is mounted through `DIMER_TABPFN_MODEL_PATH`, its SHA-256 is recorded and, if the model config carries `expectedSha256`, a mismatch raises `MODEL_INTEGRITY_FAILED`. Without a mounted checkpoint the package's cached weights are used and only their digest is recorded — that path is not pinned, and the card says so.
 - **Input integrity:** the validator enforces the selected generation's row, feature, and class caps and writes `classNames` on every result; `test.csv` is isolated from fine-tuning, early stopping, and checkpoint selection.
 - **Statistical mitigations:** stratified splitting and capping keep every class represented; evaluation prediction is chunked to bound memory.
 - **Reproducibility:** `seed` propagates to Python, NumPy, torch, and the estimators; the artifact manifest records target column, ordered feature columns, class labels, and per-artifact SHA-256; the dataset fingerprint is recorded.
@@ -162,7 +162,7 @@ Distinct from the capability and decision boundaries listed under *Out-of-scope 
 - unlawful discrimination in employment, housing, credit, insurance, education, or healthcare access, including classification on a target that proxies a protected attribute;
 - deceptive, manipulative, or predatory applications, including presenting an uncalibrated class probability as a certified risk estimate;
 - criminal-justice, medical-diagnosis, or legal-rights determinations without the validation and oversight described under *Human Life*;
-- any use outside the terms of the selected model weights — for TabPFN-3, `tabpfn-3-license-v1.0`, whose Non-Commercial Purpose excludes production deployment and revenue generation without a separate agreement — or of the DIMER deployment.
+- any use outside the terms of the selected model weights — for TabPFN-3, `tabpfn-3-license-v1.0`, whose Non-Commercial Purpose excludes production deployment and revenue generation without a separate agreement — or of the deployment that runs the pipeline.
 
 ---
 
@@ -206,7 +206,7 @@ Default requested generation:
 v3
 ```
 
-For a production-quality reproducibility chain, DIMER should mount an approved checkpoint and set:
+For a production-quality reproducibility chain, an operator should mount an approved checkpoint and set:
 
 ```text
 DIMER_TABPFN_MODEL_PATH=/path/to/approved/model.ckpt
@@ -222,7 +222,7 @@ A successful run writes, under `DIMER_OUTPUT_DIR/artifacts/`:
 - `model.ckpt` — TabPFN model weights/checkpoint, saved with TabPFN's model serialization utility.
 - `artifact_manifest.json` — target column, ordered feature columns, class labels, and artifact names.
 
-Alongside `artifacts/`, the run also writes `evaluation/report.json`, `logs/run-summary.json`, and `progress/epoch_*.json`, plus the `result.json` envelope (see `CONTRACT.md`). `result.json` declares `artifacts.modelArtifact` (path relative to `/data`) that DIMER's `export-to-repository` resolves.
+Alongside `artifacts/`, the run also writes `evaluation/report.json`, `logs/run-summary.json`, and `progress/epoch_*.json`, plus the `result.json` envelope (see `CONTRACT.md`). `result.json` declares `artifacts.modelArtifact` (path relative to `/data`) for a downstream export step to resolve.
 
 ## Evaluation
 
@@ -254,7 +254,7 @@ Copyright © Prior Labs GmbH 2026.
 ```
 
 **Hosting & Usage Boundaries:**
-- **Permitted Use (Section 1.c, 2.a):** Model weights are hosted in the DIMER Model Repository for offline distribution, research, benchmarking, evaluation, experimentation, and public data science competitions.
+- **Permitted Use (Section 1.c, 2.a):** the licence permits offline distribution, research, benchmarking, evaluation, experimentation, and public data science competitions.
 - **Hosted Service Prohibition (Section 3.d):** Under Section 3.d (*No Hosted Service*), the TABPFN-3 Model or any Derivative may **not** be distributed, hosted, or made available as part of a hosted, managed, API, or SaaS service (whether paid or free) without a separate commercial license from Prior Labs GmbH (`sales@priorlabs.ai`).
 - **Output Restrictions (Section 2.d):** Model outputs are restricted to non-commercial purposes and may not be used in production systems, client deliverables, commercial research services, or to train, fine-tune, or distill any model competitive with TabPFN.
 - **Derivatives & Fine-Tuning (Section 3.c):** Any distribution of fine-tuned weights or derivatives produced by this pipeline must include an Attribution Notice stating that the model has been modified and disclaiming endorsement or approval by Prior Labs GmbH.
@@ -268,7 +268,7 @@ Upstream references:
 
 Fine-tuned weights may encode information derived from the uploaded dataset. Dataset ownership, privacy, confidentiality, retention, and downstream-model licensing therefore remain separate deployment considerations from the upstream model license.
 
-Do not upload data to DIMER unless its processing and model-training use are authorized.
+Do not upload data to any deployment of this pipeline unless its processing and model-training use are authorized.
 
 ## Known limitations
 
