@@ -65,7 +65,7 @@ Concrete application domains envisioned during development: binary and multiclas
 
 ###### Primary Intended Users
 
-Machine-learning engineers, data scientists, and researchers building predictive systems from structured datasets. The envisioned deployment setting is internal enterprise or research use through the DIMER platform — CPU by default, GPU opt-in — and, because `tabpfn-3-license-v1.0` limits the TabPFN-3 weights to a Non-Commercial Purpose that its own definition says excludes production deployment and revenue generation, testing and evaluation only until a production enablement has been cleared against those terms.
+Machine-learning engineers, data scientists, and researchers building predictive systems from structured datasets. The envisioned deployment setting is research or in-house use on infrastructure the user controls — CPU by default, GPU opt-in — and, because `tabpfn-3-license-v1.0` limits the TabPFN-3 weights to a Non-Commercial Purpose that its own definition says excludes production deployment and revenue generation, testing and evaluation only until a production enablement has been cleared against those terms.
 
 The pipeline assumes its users understand dataset provenance, holdout evaluation, leakage, class imbalance, and distribution shift; know that `predict()` is an argmax over class probabilities not calibrated for their domain; can read `metrics.fineTuneEffective` to tell a fine-tuned run from a zero-shot fallback; and understand that random stratified splitting is wrong for temporal or grouped data, where they must supply explicit splits. A user who would ship a zero-shot fallback believing it was fine-tuned is outside the assumed competency.
 
