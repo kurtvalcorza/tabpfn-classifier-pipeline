@@ -30,7 +30,7 @@ def _validator():
 
 
 def test_static_validator_passes() -> None:
-    assert _validator().validate_all() == ["model-card", "identity-consistency", "release-status", "notebooks+parity"]
+    assert _validator().validate_all() == ["model-card", "identity-consistency", "weight-facts", "release-status", "notebooks+parity"]
 
 
 def test_profiles_and_standalone_metadata() -> None:
