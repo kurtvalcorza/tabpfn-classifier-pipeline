@@ -1,15 +1,18 @@
-"""NOTEBOOK_SPEC 2.0 parity tests (PAR1–PAR3) for the standalone tutorial notebook.
+"""NOTEBOOK_SPEC 2.2 parity tests (PAR1–PAR4, ST1) for both standalone tutorial notebooks (generator /3).
 
-The notebook carries `src/<package>/pipeline.py` verbatim; these tests fail whenever the carried
-cell, the inline manifest, or the inline pins diverge from the repository at HEAD.
+Each notebook carries the repository's package, its stage runner, the hash lock and the snapshot manifest as text in
+one carrier cell (``metadata.dimer.embedded_sources``); these tests fail whenever a carried file, the lock or the
+notebook bytes diverge from the repository at HEAD.
 """
-# ruff: noqa: E501  -- assertion messages and paths are kept on one line; repos pin line-length 100 or 110
+# ruff: noqa: E501  -- assertion messages and paths are kept on one line
 
 from __future__ import annotations
 
+import ast
+import base64
+import hashlib
 import importlib.util
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -27,22 +30,14 @@ def _load(name: str):
 
 
 build = _load("build_notebook")
-TEMPLATE = _load("notebook_template").TEMPLATE
-NOTEBOOK = ROOT / "tutorials" / TEMPLATE["notebook_name"]
-PKG_DIR = ROOT / TEMPLATE.get("package_dir", f"src/{TEMPLATE['package']}")
-MODULE = PKG_DIR / TEMPLATE.get("entry_module", "pipeline.py")
-MANIFEST = ROOT / "weights" / TEMPLATE["weights_key"] / "dimer-base-manifest.json"
+TEMPLATES = {name: _load(name).TEMPLATE for name in ("notebook_template", "notebook_template_artifact_inference")}
 
 
-@pytest.fixture(scope="module")
-def notebook() -> dict:
-    if not NOTEBOOK.exists():
-        pytest.skip(f"{NOTEBOOK.name} not generated yet")
-    return json.loads(NOTEBOOK.read_text(encoding="utf-8"))
-
-
-def _cells(notebook: dict, cell_type: str) -> list[dict]:
-    return [c for c in notebook["cells"] if c["cell_type"] == cell_type]
+def _notebook(template: dict) -> dict:
+    path = ROOT / "tutorials" / template["notebook_name"]
+    if not path.exists():
+        pytest.skip(f"{path.name} not generated yet")
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _source(cell: dict) -> str:
@@ -50,76 +45,62 @@ def _source(cell: dict) -> str:
     return "".join(src) if isinstance(src, list) else src
 
 
-def test_par1_embedded_modules_equal_repository_modules(notebook: dict) -> None:
-    """One tagged cell per carried module, in dependency order, each equal to its module after rewrites."""
-    tagged = [
-        c for c in _cells(notebook, "code") if c.get("metadata", {}).get("dimer", {}).get("embedded_module")
-    ]
+def _carrier(notebook: dict) -> dict[str, dict]:
+    cells = [c for c in notebook["cells"] if c["cell_type"] == "code" and c.get("metadata", {}).get("dimer", {}).get("embedded_sources")]
+    assert len(cells) == 1, "exactly one carrier cell"
+    values = {}
+    for node in ast.parse(_source(cells[0])).body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") in ("CARRIED_FILES", "CARRIED_BINARY", "CARRIED_HASHES"):
+            values[node.targets[0].id] = ast.literal_eval(node.value)
+    return values
+
+
+@pytest.mark.parametrize("name", sorted(TEMPLATES))
+def test_par1_carried_files_equal_repository_files(name: str) -> None:
+    template = TEMPLATES[name]
+    notebook = _notebook(template)
+    carried = _carrier(notebook)
     recorded = notebook["metadata"]["dimer"]["generated_from"]["revision"]
-    ctx = build.load_context(ROOT, TEMPLATE, recorded)
-    assert [c["metadata"]["dimer"]["embedded_module"] for c in tagged] == ctx["module_rels"]
-    for cell, module in zip(tagged, ctx["modules"], strict=True):
-        rel = f"{ctx['pkg_rel']}/{module}"
-        assert cell["metadata"]["dimer"]["module_sha256"] == ctx["per_module_sha256"][rel]
-        drifted = f"embedded module cell for {rel} drifted from the package; regenerate the notebook"
-        assert _source(cell).rstrip("\n") + "\n" == ctx["embedded"][module], drifted
+    ctx = build.load_context(ROOT, template, recorded)
+    assert carried["CARRIED_FILES"] == ctx["files"], "a carried file drifted from the repository; regenerate the notebook"
+    assert carried["CARRIED_BINARY"] == ctx["binary"]
+    for dest, source in build.carried_sources(ROOT, template).items():
+        assert carried["CARRIED_FILES"][dest] == (ROOT / source).read_text(encoding="utf-8").replace("\r\n", "\n"), dest
+    for dest, text in carried["CARRIED_FILES"].items():
+        assert carried["CARRIED_HASHES"][dest] == hashlib.sha256(text.encode("utf-8")).hexdigest(), dest
+    for dest, data in carried["CARRIED_BINARY"].items():
+        assert base64.b64decode(data) == (ROOT / template["carried_binary"][dest]).read_bytes(), dest
+        assert carried["CARRIED_HASHES"][dest] == hashlib.sha256(base64.b64decode(data)).hexdigest(), dest
 
 
-REWRITES = TEMPLATE.get("rewrites", build.REWRITES)  # a template may declare its own rules (generator /2)
-
-
-def test_par1_rewrite_rules_are_the_only_difference() -> None:
-    """Every line the generator changed in a carried module is a documented rewrite: the template's
-    `__file__` rules (each exactly once across modules), a removed package-relative import, or a
-    disabled `__main__` guard. Compared with difflib because a multi-line import collapses to one
-    marker line."""
-    import difflib
-
-    ctx = build.load_context(ROOT, TEMPLATE)
-    rule_hits = 0
-    for module, original in ctx["texts"].items():
-        a, b = original.splitlines(), ctx["embedded"][module].splitlines()
-        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(a=a, b=b, autojunk=False).get_opcodes():
-            if tag == "equal":
-                continue
-            replaced = b[j1:j2]
-            assert replaced and all("standalone rewrite" in line for line in replaced), (module, a[i1:i2], replaced)
-            rule_hits += sum("__file__" in line for line in a[i1:i2])
-    assert rule_hits == len(REWRITES)
-
-
-def test_par2_inline_manifest_and_pins_match_repository(notebook: dict) -> None:
-    code = "\n".join(_source(c) for c in _cells(notebook, "code"))
-    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    inline = re.search(r"^MANIFEST = (\{.*?^\})$", code, re.M | re.S)
-    assert inline, "model cell must carry MANIFEST = {...}"
-    assert json.loads(inline.group(1)) == manifest
-    pins_block = re.search(r"^PINS = \[(.*?)^\]", code, re.M | re.S)
-    assert pins_block, "install cell must carry PINS = [...]"
-    inline_pins = re.findall(r"'([^']+)'", pins_block.group(1))
-    assert inline_pins == build._pins(ROOT, TEMPLATE)
-    meta = notebook["metadata"]["dimer"]
+@pytest.mark.parametrize("name", sorted(TEMPLATES))
+def test_par2_lock_pins_every_runtime_pin_with_hashes(name: str) -> None:
+    template = TEMPLATES[name]
+    lock = (ROOT / template["lock"]).read_text(encoding="utf-8")
+    build.check_lock(build._pins(ROOT), lock)  # raises SystemExit on any drift or unhashed entry
+    meta = _notebook(template)["metadata"]["dimer"]
     assert meta["standalone"] is True
     assert meta["notebook_spec"] == build.NOTEBOOK_SPEC
-    pkg_dir = TEMPLATE.get("package_dir", f"src/{TEMPLATE['package']}")
-    entry = TEMPLATE.get("entry_module", "pipeline.py")
-    assert meta["generated_from"]["module"] == f"{pkg_dir}/{entry}"
-    assert meta["generated_from"]["module_sha256"] == build.load_context(ROOT, TEMPLATE)["module_sha256"]
+    assert meta["generated_from"]["module"] == f"src/{template['package']}/{template.get('entry_module', 'pipeline.py')}"
+    assert meta["generated_from"]["module_sha256"] == build.load_context(ROOT, template)["module_sha256"]
 
 
-def test_par3_generator_check_is_clean(notebook: dict) -> None:
-    # The recorded revision is a provenance label carried through the check (see build_notebook.py
-    # --check); content drift is what fails this comparison.
+@pytest.mark.parametrize("name", sorted(TEMPLATES))
+def test_par3_generator_check_is_clean(name: str) -> None:
+    template = TEMPLATES[name]
+    notebook = _notebook(template)
     recorded = notebook["metadata"]["dimer"]["generated_from"]["revision"]
-    rendered = build.to_bytes(build.render(ROOT, TEMPLATE, recorded))
-    current = NOTEBOOK.read_bytes().replace(b"\r\n", b"\n")  # autocrlf checkouts are CRLF
-    assert current == rendered, "notebook is stale; run python tools/build_notebook.py"
+    rendered = build.to_bytes(build.render(ROOT, template, recorded))
+    current = (ROOT / "tutorials" / template["notebook_name"]).read_bytes().replace(b"\r\n", b"\n")
+    assert current == rendered, "notebook is stale; run python tools/build_notebook.py (with --template for the companion)"
 
 
-def test_st1_primary_path_has_no_repository_dependency(notebook: dict) -> None:
-    code = "\n".join(_source(c) for c in _cells(notebook, "code"))
-    assert "git" not in re.findall(r"subprocess\.run\(\[([^\]]*)\]", code).__str__()
-    assert f"import {TEMPLATE['package']}" not in code
-    assert f"from {TEMPLATE['package']}" not in code
-    # own-repository clone/install (ST1); SHA-pinned upstream git dependencies are allowed
-    assert "github.com/kurtvalcorza" not in code
+@pytest.mark.parametrize("name", sorted(TEMPLATES))
+def test_st1_primary_path_has_no_repository_dependency(name: str) -> None:
+    notebook = _notebook(TEMPLATES[name])
+    own = "\n".join(_source(c) for c in notebook["cells"] if c["cell_type"] == "code" and not c.get("metadata", {}).get("dimer", {}).get("embedded_sources"))
+    assert f"import {TEMPLATES[name]['package']}" not in own
+    assert f"from {TEMPLATES[name]['package']}" not in own
+    assert "github.com/kurtvalcorza" not in own
+    assert "git clone" not in own
+    assert "worker.run(" not in own and "worker_cli(" not in own

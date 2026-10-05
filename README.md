@@ -120,7 +120,7 @@ exported `.ipynb` needs no clone, no package install, no token and no access to 
 
 | Notebook | Profile | What it does |
 |---|---|---|
-| `tabpfn_classifier_colab.ipynb` | `TASK-INFERENCE` | synthetic or BYOD table → `validate_inputs` → **in-context** fit on the pinned checkpoint (no gradient update) → `accuracy`, `balancedAccuracy`, `logLoss`, `rocAuc` vs the majority-class baseline (`majority_class_baseline`) → `evaluation_report` → artifact bundle → fresh-boundary reload (recomputed validation accuracy equal to the recorded value within `1e-6`) → new-row scoring → exports |
+| `tabpfn_classifier_colab.ipynb` | `E2E` | synthetic or BYOD table → `validate_inputs` (coded findings, identifiers kept out of the features) → **in-context** fit on the pinned checkpoint (no gradient update; a proposed RUN7 deviation) → `accuracy`, `balancedAccuracy`, `logLoss`, `rocAuc` vs the majority-class baseline and a logistic-regression reference → `evaluation_report` → artifact bundle → fresh-process reload (probabilities on every validation row equal within `rtol=1e-5`, `atol=1e-6`) → new-row scoring with identifiers kept → exports |
 | `tabpfn_classifier_artifact_inference_colab.ipynb` | `ARTIFACT-INFERENCE` | externally produced bundle → `validate_artifact_bundle` before deserialisation (bundled `model.ckpt` must equal the pinned checkpoint) → `from_artifact` → `validate_new_rows` → predict → exports (`not-measurable` evaluation report) |
 
 **The private-worker fine-tuning path is not carried.** `tabpfn-classifier-finetuner` is private and the TabPFN-3
