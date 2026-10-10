@@ -1,32 +1,49 @@
-"""Companion template for tools/build_notebook.py — ARTIFACT-INFERENCE (NOTEBOOK_SPEC 1.1 §3.6, §18).
+"""Companion template for tools/build_notebook.py /3 — ARTIFACT-INFERENCE (NOTEBOOK_SPEC 2.2 §19, §25.13).
 
-Generate with ``python tools/build_notebook.py --template tools/notebook_template_artifact_inference.py``. The
-notebook carries the same package module and the same pinned snapshot as the task-inference notebook; it consumes
-a `model.tabpfn_fit` + `model.ckpt` + `artifact_manifest.json` bundle produced by a *separate* execution (the
-task-inference tutorial, or the DIMER worker — same contract) and never creates one.
+Generate with ``python tools/build_notebook.py --template tools/notebook_template_artifact_inference.py``. The notebook
+carries the same package and pinned checkpoint manifest as the E2E notebook and its own stage runner
+(``tools/tutorial_stages_artifact_inference.py``). The default path downloads the trusted sample bundle pinned in
+``examples/sample_bundle_pin.json`` (NOTEBOOK_SPEC SART6-SART8: release asset ``sample-bundle-v1`` of this repository,
+written by ``tools/build_sample_bundle.py`` from a recorded run of the E2E notebook; manifest, fitted archive and eight
+unlabelled rows, no checkpoint) and verifies its size and SHA-256 before extraction, then assembles it with the checkpoint
+verified in Section 3. A user bundle ZIP (``ARTIFACT_ZIP_PATH`` or an upload) is checked against ``EXPECTED_ZIP_SHA256`` /
+``EXPECTED_FITTED_SHA256``. The notebook never creates a bundle.
 """
 # ruff: noqa: E501  -- markdown prose and code-cell text are kept on single lines for readable rendering
 
 import importlib.util
+import json
 from pathlib import Path
 
-_spec = importlib.util.spec_from_file_location("_task_notebook_template", Path(__file__).with_name("notebook_template.py"))
+_spec = importlib.util.spec_from_file_location("_e2e_notebook_template", Path(__file__).with_name("notebook_template.py"))
 assert _spec and _spec.loader
-_task_module = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_task_module)
-BADGES, REPO, _TASK = _task_module.BADGES, _task_module.REPO, _task_module.TEMPLATE
+_e2e_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_e2e_module)
+BADGES, REPO, ENVIRONMENT, RUNTIME_PREREQ, LICENCE_PREREQ = _e2e_module.BADGES, _e2e_module.REPO, _e2e_module.ENVIRONMENT, _e2e_module.RUNTIME_PREREQ, _e2e_module.LICENCE_PREREQ
+# The trusted sample artifact (SART6): a release asset of this repository, pinned by URL, size and SHA-256.
+SAMPLE_PIN = Path(__file__).resolve().parents[1] / "examples" / "sample_bundle_pin.json"
+SAMPLE_ARTIFACT = json.loads(SAMPLE_PIN.read_text(encoding="utf-8"))
+_SAMPLE_LITERAL = repr(SAMPLE_ARTIFACT).replace("{", "{{").replace("}", "}}")
+_CARRIED_EXTRA, _CARRIED_BINARY = {}, {}
+_DEFAULT_PATH = (
+    "downloads the **trusted sample bundle** pinned in Section 4 (release asset `" + SAMPLE_ARTIFACT["tag"] + "` of this repository, written by the E2E notebook in a recorded run; about " + str(round(SAMPLE_ARTIFACT["bytes"] / 1024)) + " KB, no sign-in) and checks its size and SHA-256 **before extraction**; assembles it with the checkpoint verified in Section 3 as its `model.ckpt`; validates the bundle; rebuilds the estimator from it without refitting; validates the sample's eight unlabelled rows into an input manifest; predicts with class probabilities, reports what cannot be measured, and exports outputs. No upload dialog is opened."
+)
+_SAMPLE_PREREQ = "- **Bundle:** by default the trusted sample bundle (release asset `" + SAMPLE_ARTIFACT["tag"] + "` of this repository: `artifact_manifest.json`, `model.tabpfn_fit`, eight unlabelled rows and their digest record `SAMPLE_BUNDLE.json`; no checkpoint), produced by the E2E notebook and pinned by URL and SHA-256, plus the verified checkpoint as its `model.ckpt`; optionally your own ZIP exported by the E2E notebook, by `ARTIFACT_ZIP_PATH` or upload, with the digests it printed."
 
 TEMPLATE = {
-    **{k: _TASK[k] for k in ("package", "repo_name", "pipeline_class", "weights_key", "runtime_imports")},
+    **ENVIRONMENT,
     "stem": "tabpfn_classifier_artifact_inference",
     "notebook_name": "tabpfn_classifier_artifact_inference_colab.ipynb",
     "profile": "ARTIFACT-INFERENCE",
     "mode": "GUIDED",
+    "stage_runner": "tools/tutorial_stages_artifact_inference.py",
+    "carried_extra": _CARRIED_EXTRA,
+    "carried_binary": _CARRIED_BINARY,
     "run_all": (
-        "**Known NOTEBOOK_SPEC 2.0 gap (§19, SART1/RUN5/RUN2):** the default path does not yet obtain a trusted sample bundle or sample input automatically — with `ARTIFACT_ZIP_PATH` and `NEW_DATA_PATH` empty, Sections 4 and 6 open upload dialogs for a predictor bundle produced by the E2E tutorial and for unlabelled rows; an executor sets both paths to files already in the runtime to skip the dialogs. Until a published sample bundle and sample rows are wired in, this notebook is a `Candidate`, not release-grade. Once they are present, **Run all** installs the pinned dependencies, validates the bundle (path-safe extraction, manifest digests, provenance, pinned model identity) before any deserialisation, reconstructs the serving estimator from the bundle alone (fitted state and checkpoint digests verified against `EXPECTED_FITTED_SHA256`/`EXPECTED_CKPT_SHA256` when supplied; nothing refit), validates the new rows into an input manifest, predicts with class probabilities, reports what cannot be measured, and exports outputs — all inside this kernel, with no DIMER worker or service and no credential."
+        "Selecting **Run all** in a fresh Linux x86_64 runtime builds an isolated Python environment from the carried hash-locked requirements without touching the notebook kernel's own packages, stages and digest-verifies the pinned TabPFN-3 checkpoint, then " + _DEFAULT_PATH + " No repository clone, DIMER worker or service, credential, configuration edit or runtime restart is required (NOTEBOOK_SPEC 2.2 §5, §19). No hosted run of this revision has been recorded yet."
     ),
     "byod": (
-        "New-input BYOD is the `NEW_DATA_PATH`/upload branch in Section 6: your own unlabelled CSV with the bundle's required feature columns passes through the same validation, prediction and export cells. A user-supplied bundle is the separate `ARTIFACT_ZIP_PATH`/upload branch in Section 4 (`EXPECTED_ZIP_SHA256`, `EXPECTED_FITTED_SHA256` and `EXPECTED_CKPT_SHA256` pin it), validated before any state is reconstructed. Uploads stay inside this runtime; do not upload confidential or restricted data unless you are authorised to process it here."
+        "Your own bundle is the `ARTIFACT_ZIP_PATH` / `UPLOAD_ARTIFACT` branch in Section 4: paste the ZIP and fitted-archive digests the E2E notebook printed into `EXPECTED_ZIP_SHA256` / `EXPECTED_FITTED_SHA256`, and any other file is refused before it is loaded. Your own unlabelled rows are the `NEW_DATA_PATH` / `UPLOAD_NEW_DATA` branch in Section 6 (the bundle's feature columns, plus identifier columns you list in `ID_COLUMNS`, which are kept beside the predictions). Paths work in Colab, Kaggle and Jupyter; the upload dialogs exist only in Colab. Uploads stay inside this runtime; do not upload confidential or restricted data unless you are authorised to process it here."
     ),
     "title": "TabPFN-3 Classifier — DIMER artifact inference tutorial (standalone)",
     "badges": [
@@ -39,224 +56,323 @@ TEMPLATE = {
         )
         for badge in BADGES
     ],
-    "capability": "serving-state reconstruction from an externally produced DIMER TabPFN classifier bundle (`artifact_manifest.json` + `model.tabpfn_fit` + `model.ckpt`) and class-probability inference on genuinely new rows under an explicit `argmax` rule",
+    "capability": "serving-state reconstruction from an externally produced TabPFN-3 classifier bundle (`artifact_manifest.json` + `model.tabpfn_fit` + `model.ckpt`) and class-probability inference on genuinely new rows under an explicit `argmax` rule",
     "intro": (
-        "This notebook consumes a DIMER artifact bundle produced **outside this execution** — by the task-inference "
-        "tutorial in a separate session, or by the DIMER worker, which writes the same three files: "
-        "`artifact_manifest.json`, `model.tabpfn_fit` (fitted estimator state including the in-context training rows) "
-        "and `model.ckpt` (foundation weights). It validates the bundle before any model state is deserialised "
-        "(manifest schema and task type, member names, sizes, SHA-256 digests, archive safety of the fitted ZIP), "
-        "checks the bundled checkpoint against the pinned TabPFN-3 checkpoint carried by this notebook, reconstructs the "
-        "estimator through the carried module (`from_artifact`: the fitted archive's recorded `model_path` is rewritten "
-        "in a temporary copy to the companion checkpoint; TabPFN's `load_fitted_tabpfn_model` restores the state), "
-        "accepts genuinely new unlabelled rows, predicts, and exports results. **No training, fine-tuning or in-context "
-        "refitting occurs, and no artifact is created here.**\n\n"
-        "**Trust boundary.** Digest checks establish that the three files are internally consistent, not that the "
-        "sender is trustworthy. `model.tabpfn_fit` is a ZIP of JSON parameters plus serialised Python/torch estimator "
-        "state and `model.ckpt` is a torch checkpoint; loading them executes trusted model state, and the archive "
-        "path-safety checks do not change that. The pinned checkpoint of Section 3 is acquired and digest-verified "
-        "independently so the bundled `model.ckpt` can be required to equal it byte for byte. Load only bundles from a "
-        "producer you trust, and paste the digests you were given out-of-band into the expected-digest fields. The "
-        "TabPFN-3 weights are non-commercial (`tabpfn-3-license-v1.0`)."
+        "This notebook consumes a bundle produced **outside this execution** — the ZIP the E2E tutorial exports, from a "
+        "separate session. It checks the ZIP against trusted digests, refuses any member other than the three expected "
+        "ones before extracting, validates the manifest schema, sizes and digests and requires `model.ckpt` to be the pinned "
+        "checkpoint verified in Section 3, rebuilds the fitted estimator with `from_artifact` (no refit, no download), "
+        "accepts genuinely new unlabelled rows, predicts class labels with class probabilities, and exports results. **No "
+        "artifact is created here** and no fitting happens.\n\n"
+        "**Trust boundary.** `model.tabpfn_fit` holds joblib-serialised estimator state, which is code-capable, and "
+        "`model.ckpt` is a PyTorch checkpoint. The checkpoint is bound by its digest to the published TabPFN-3 file. The "
+        "fitted archive has no public reference digest: the only binding is a trusted digest received from the producer "
+        "through a separate channel (`EXPECTED_FITTED_SHA256`, or `EXPECTED_ZIP_SHA256` for the whole ZIP). Digests inside "
+        "`artifact_manifest.json` establish internal consistency, not sender authenticity. Use only bundles from a trusted "
+        "producer."
     ),
     "learning_objectives": (
-        "install the pinned runtime, read what the carried module guarantees, resolve and digest-verify the immutable "
-        "TabPFN-3 checkpoint, supply an externally produced bundle and validate it before any model state is "
-        "reconstructed, require the bundled checkpoint to equal the pinned one, reconstruct the serving estimator from the "
-        "bundle alone, validate new unlabelled rows into an input manifest, predict class labels with class probabilities "
-        "under an explicit `argmax` rule, produce an evaluation report that is `not-measurable` because no labels exist, "
-        "and export machine-readable predictions plus provenance."
+        "by the end of this notebook you will be able to —\n\n"
+        "1. **Explain** what a TabPFN bundle contains and why the fitted archive travels with the checkpoint (Sections 4, 5).\n"
+        "2. **Verify** a bundle against trusted digests and **distinguish** what binds the checkpoint from what binds the fitted archive (Section 4).\n"
+        "3. **Diagnose** a refused bundle or input table from its message (Sections 4, 6).\n"
+        "4. **Apply** the rebuilt estimator to new rows, keep your identifiers, and read class-ordered, uncalibrated probabilities (Section 7).\n"
+        "5. **Explain** why the evaluation report says `not-measurable` here (Section 7).\n"
+        "6. **Predict**, run and **explain** which check refuses a tampered bundle, in an optional activity (Section 8)."
     ),
     "exclusions": (
-        "artifact creation, in-notebook support fitting, fine-tuning, regression, calibrated probabilities, or any "
-        "quality claim: without labelled rows nothing is measured, and the exported probabilities are uncalibrated "
-        "ensemble outputs with no shipped threshold."
+        "artifact creation, in-notebook fitting, fine-tuning, regression, calibrated probabilities, or any quality claim: "
+        "without labelled rows nothing is measured, and the exported probabilities are uncalibrated ensemble outputs with "
+        "no shipped threshold."
     ),
     "prerequisites": [
-        "- **Runtime:** a fresh supported runtime (Google Colab or Jupyter, Python 3.11+). The default path runs on CPU and uses CUDA automatically when available.",
-        "- **Artifact:** an externally produced bundle ZIP holding `artifact_manifest.json`, `model.tabpfn_fit` and `model.ckpt` (the task-inference tutorial writes `outputs/tabpfn_classifier_artifact.zip`; a DIMER worker's `artifacts/` directory zipped flat works too). Supply it through the upload dialog, or set `ARTIFACT_ZIP_PATH` to a file already present in the runtime for non-interactive execution. Nothing in this notebook manufactures it.",
-        "- **Data:** one separate, unlabelled CSV with exactly the bundle's feature columns. It is supplied by upload or by `NEW_DATA_PATH`; no sample is bundled, because scoring self-generated rows would not be external-artifact evidence. Do not upload confidential or restricted data to a hosted notebook environment unless you are authorized to do so. Uploaded inputs remain in the notebook runtime; this pipeline does not send them to a third-party inference API.",
+        RUNTIME_PREREQ,
+        "- **Knowledge:** basic pandas and how to read a printed Python dictionary. The E2E notebook explains in-context learning and the metrics; this notebook's glossary repeats the terms it uses.",
+        _SAMPLE_PREREQ,
+        "- **Data:** one unlabelled CSV with the bundle's feature columns (the E2E notebook writes `outputs/tabpfn_classifier_new_rows.csv`), by `NEW_DATA_PATH` or upload; extra identifier columns are allowed when listed in `ID_COLUMNS`. Do not upload confidential or restricted data to a hosted notebook environment unless you are authorized to do so. Uploaded inputs remain in the notebook runtime; this pipeline does not send them to a third-party inference API.",
+        LICENCE_PREREQ,
     ],
+    "guided": {
+        "opening": [
+            (
+                "## How to use this notebook\n\n"
+                "**Who this notebook is for.** Learners who have run, or read, the E2E TabPFN tutorial and want to see how a "
+                "packaged in-context classifier is reused safely by someone else: checking what was received, rebuilding it, and "
+                "scoring new rows. You need to be able to run notebook cells and read short Python; the glossary explains every "
+                "term.\n\n"
+                "**Running it.** Choose *Runtime → Run all*. The default path needs no edit, no upload, no account, no token and "
+                "no runtime restart: it downloads the trusted sample bundle pinned in Section 4 (a bundle the E2E notebook "
+                "exported, with its eight unlabelled rows) and refuses it unless its SHA-256 matches. To score your own bundle, "
+                "run the E2E notebook, keep its `outputs/tabpfn_classifier_artifact.zip`, the digests it printed and "
+                "`outputs/tabpfn_classifier_new_rows.csv`, put them in this runtime, and set `ARTIFACT_ZIP_PATH`, the two digests "
+                "and `NEW_DATA_PATH`.\n\n"
+                "**Where the code runs.** The notebook kernel installs nothing and imports no model library. Each learner cell "
+                "calls `run_stage('…')`, which runs one stage of the carried stage runner in its own process and stops the "
+                "notebook with the stage's own error message if it fails.\n\n"
+                "**Two kinds of cell.** *Learner cells* (Sections 4–8) are the workflow. *Infrastructure cells* (Sections 1–3) are "
+                "collapsed and titled **Infrastructure**; you may run them without studying their implementation.\n\n"
+                "**Form controls.** `ARTIFACT_ZIP_PATH`, `UPLOAD_ARTIFACT`, `EXPECTED_ZIP_SHA256` and `EXPECTED_FITTED_SHA256` "
+                "(Section 4); `NEW_DATA_PATH`, `UPLOAD_NEW_DATA` and `ID_COLUMNS` (Section 6); `RUN_ACTIVITY` and `TAMPER` "
+                "(Section 8).\n\n"
+                "**Section tags.** **[Concept]**, **[Evaluation practice]**, **[Engineering]** as in the E2E notebook.\n\n"
+                "**Predict, then check.** Before Sections 4 and 7 a **Predict before running** prompt asks you to commit to an "
+                "expectation; **What to notice** follows each stage; a collapsed **Check your reasoning** answer follows each "
+                "checkpoint."
+            ),
+            (
+                "## The task: Input → Model → Output\n\n"
+                "| Stage | Input | Model / system | Output |\n"
+                "|---|---|---|---|\n"
+                "| **Verify** | a bundle ZIP with trusted digests | digest checks, member allowlist, `safe_extract_zip`, `validate_artifact_bundle`, checkpoint = pinned | accepted or refused, with the pinned digests printed |\n"
+                "| **Rebuild** | the fitted archive + the verified checkpoint | `from_artifact` (no refit, no download) | an estimator with the producer's class order |\n"
+                "| **Validate rows** | unlabelled rows with the bundle's features (+ `ID_COLUMNS`) | `validate_new_rows`, numeric-type check | an input manifest; refusals name the column and rule |\n"
+                "| **Predict** | the validated rows | TabPFN-3 reading the bundle's fitted support | `prediction` + `proba_<class>` (stored class order), identifiers kept, a `not-measurable` report |\n\n"
+                "## Roadmap\n\n"
+                "| Section | Tag | What happens | What you read |\n"
+                "|---|---|---|---|\n"
+                "| 1–3 | [Engineering] | runtime, carried code, isolated environment, verified checkpoint | versions, digest |\n"
+                "| 4. Verify the bundle | [Engineering] | trusted digests, member allowlist, extraction, provenance | the trust record |\n"
+                "| 5. Rebuild the estimator | [Concept] | `from_artifact` on the verified files | classes, device |\n"
+                "| 6. Validate the new rows | [Evaluation practice] | input manifest, refusal probe, numeric check | the manifest |\n"
+                "| 7. Predict and export | [Concept] | probabilities, labels, `not-measurable` report, provenance | the outputs |\n"
+                "| 8. Optional activity | [Concept] | tamper with a copy of the bundle (off by default) | which check refuses it |\n"
+                "| Troubleshooting | [Engineering] | every refusal and what to do | when something fails |\n"
+                "| Interpretation and conclusion | [Evaluation practice] | what was and was not shown | your conclusion |"
+            ),
+            (
+                "<details>\n"
+                "<summary><strong>Glossary</strong> — open when a term is unfamiliar</summary>\n\n"
+                "| Term | Meaning in this notebook |\n"
+                "|---|---|\n"
+                "| **Bundle** | `artifact_manifest.json` + `model.tabpfn_fit` + `model.ckpt`. |\n"
+                "| **Fitted archive** | The fitted estimator state (preprocessing and support rows), without the foundation weights. |\n"
+                "| **Foundation checkpoint** | A byte copy of the pinned TabPFN-3 checkpoint; it must equal the file Section 3 verified. |\n"
+                "| **Trusted digest** | A SHA-256 obtained from the producer through a channel you trust (the E2E export prints them). |\n"
+                "| **Internal consistency** | The manifest's recorded digests match its files; a forger who rewrites both still passes. |\n"
+                "| **Code-capable file** | A file whose loading can execute code (joblib, PyTorch); load only verified or trusted files. |\n"
+                "| **Member allowlist** | The ZIP may hold exactly the three bundle files, each once, at the top level. |\n"
+                "| **Identifier column (`ID_COLUMNS`)** | A key kept beside the predictions and never given to the model. |\n"
+                "| **`argmax` rule / uncalibrated** | Predict the most probable class; the probabilities are not guaranteed to match observed frequencies. |\n"
+                "| **`not-measurable`** | The evaluation verdict when no labels exist. |\n"
+                "| **Hash-locked environment / stage** | The isolated Python environment every stage runs in; one workflow step run as its own process. |\n\n"
+                "</details>"
+            ),
+        ],
+    },
     "cells": [
         {
             "md": (
-                "## 4. Supply the external bundle and validate it before any model state is reconstructed\n\n"
-                "The bundle ZIP comes from `ARTIFACT_ZIP_PATH` (an executor places it there) or from the upload dialog; "
-                "an optional `EXPECTED_ZIP_SHA256` and the two member digests `EXPECTED_FITTED_SHA256` / "
-                "`EXPECTED_CKPT_SHA256` — pasted from the producer's record — fail closed on mismatch. "
-                "`safe_extract_zip` extracts member by member (bare file names only, expanded-size and ratio ceilings; "
-                "never `extractall`), then `validate_artifact_bundle` checks the manifest schema and task type, that "
-                "both binary members are named by the manifest, exist and are plausibly sized, that their SHA-256 "
-                "digests match the manifest (and the expected values), and that the fitted archive is a ZIP whose members "
-                "are all safe relative paths and which carries `init_params.json` — all **before** anything is "
-                "deserialised. The bundled `model.ckpt` must equal the pinned checkpoint of Section 3 (`WEIGHTS_SHA256`): "
-                "a bundle produced on other weights is refused. Look for the feature schema and the classes the "
-                "artifact expects."
+                "## 4. Verify the bundle before any model state is loaded · [Engineering]\n\n"
+                "The `artifact` stage takes the bundle from `ARTIFACT_ZIP_PATH` (a ZIP already in the runtime), from the upload "
+                "dialog (`UPLOAD_ARTIFACT`, Colab), or — with both empty — from the trusted sample bundle pinned in "
+                "`SAMPLE_ARTIFACT` (release asset `" + SAMPLE_ARTIFACT["tag"] + "` of this repository, written by the E2E notebook "
+                "in a recorded run): it is downloaded once and refused unless its size and whole-archive SHA-256 equal the pin and "
+                "it holds exactly its four files; each file is then checked against the digest record `SAMPLE_BUNDLE.json`, and "
+                "the pinned checkpoint from Section 3 becomes its `model.ckpt`. For your own ZIP it first checks "
+                "`EXPECTED_ZIP_SHA256`, then reads the member list and **refuses** anything but `artifact_manifest.json`, "
+                "`model.tabpfn_fit` and `model.ckpt`, each once at the top level (an extra `notes.txt`, or a `sub/model.ckpt` that "
+                "flattening would let overwrite `model.ckpt`), and only then extracts member by member with `safe_extract_zip`. "
+                "`validate_artifact_bundle` checks the manifest schema, the member names and sizes, both digests (the fitted one "
+                "against `EXPECTED_FITTED_SHA256` when given) and requires `model.ckpt` to be the pinned checkpoint. The stage "
+                "prints which digests were pinned and which were only taken from the manifest.\n\n"
+                "**Predict before running:** if you leave both digest fields empty, which of the three files is still bound to "
+                "something outside the bundle?"
             ),
             "code": (
                 "ARTIFACT_ZIP_PATH = ''  # @param {{type:\"string\"}}\n"
+                "UPLOAD_ARTIFACT = False  # @param {{type:\"boolean\"}}\n"
                 "EXPECTED_ZIP_SHA256 = ''  # @param {{type:\"string\"}}\n"
                 "EXPECTED_FITTED_SHA256 = ''  # @param {{type:\"string\"}}\n"
-                "EXPECTED_CKPT_SHA256 = ''  # @param {{type:\"string\"}}\n\n"
-                "os.makedirs('outputs', exist_ok=True)\n"
-                "WORK = Path('work')\n"
-                "shutil.rmtree(WORK, ignore_errors=True)\n"
-                "WORK.mkdir(parents=True)\n"
+                "# The trusted sample artifact (NOTEBOOK_SPEC SART6-SART8): a release asset of this repository written by the E2E\n"
+                "# notebook in a recorded run, pinned by URL, size and SHA-256; checked before extraction. Do not edit.\n"
+                "SAMPLE_ARTIFACT = " + _SAMPLE_LITERAL + "\n\n"
+                "def upload_one(what, field):\n"
+                "    try:\n"
+                "        from google.colab import files\n"
+                "    except ImportError:\n"
+                "        raise RuntimeError(f'The upload dialog exists only in Google Colab: set {{field}} to {{what}} in this runtime.') from None\n"
+                "    uploaded = files.upload()\n"
+                "    if not uploaded:\n"
+                "        raise RuntimeError(f'The upload was cancelled or empty: no file was received. Run this cell again and choose {{what}}, or set {{field}}.')\n"
+                "    if len(uploaded) != 1:\n"
+                "        raise ValueError(f'Upload exactly one file ({{what}}); got {{sorted(uploaded)}}.')\n"
+                "    upload_name, payload = next(iter(uploaded.items()))\n"
+                "    path = ROOT / 'inputs' / Path(upload_name).name\n"
+                "    path.parent.mkdir(parents=True, exist_ok=True)\n"
+                "    path.write_bytes(payload)\n"
+                "    return str(path)\n\n"
+                "artifact_source, zip_path = 'sample', ''\n"
                 "if ARTIFACT_ZIP_PATH:\n"
-                "    zip_name, zip_payload = Path(ARTIFACT_ZIP_PATH).name, Path(ARTIFACT_ZIP_PATH).read_bytes()\n"
-                "    artifact_source = f'path: {{ARTIFACT_ZIP_PATH}}'\n"
-                "else:\n"
-                "    from google.colab import files\n"
-                "    uploaded = files.upload()\n"
-                "    if len(uploaded) != 1:\n"
-                "        raise RuntimeError('Upload exactly one bundle ZIP.')\n"
-                "    zip_name, zip_payload = next(iter(uploaded.items()))\n"
-                "    artifact_source = 'upload dialog'\n"
-                "zip_path = WORK / Path(zip_name).name\n"
-                "zip_path.write_bytes(zip_payload)\n"
-                "zip_sha256 = sha256_file(zip_path)\n"
-                "for label, expected in (('EXPECTED_ZIP_SHA256', EXPECTED_ZIP_SHA256), ('EXPECTED_FITTED_SHA256', EXPECTED_FITTED_SHA256), ('EXPECTED_CKPT_SHA256', EXPECTED_CKPT_SHA256)):\n"
-                "    expected = expected.strip().lower()\n"
-                "    if expected and (len(expected) != 64 or any(character not in '0123456789abcdef' for character in expected)):\n"
-                "        raise ValueError(f'{{label}} must be 64 hex chars')\n"
-                "if EXPECTED_ZIP_SHA256 and zip_sha256 != EXPECTED_ZIP_SHA256.strip().lower():\n"
-                "    raise RuntimeError('Artifact ZIP SHA-256 mismatch')\n"
-                "ARTIFACT_DIR = WORK / 'external-artifact'\n"
-                "members = safe_extract_zip(zip_path, ARTIFACT_DIR)\n"
-                "required = {{ARTIFACT_MANIFEST_NAME, FITTED_NAME, CHECKPOINT_NAME}}\n"
-                "if not required <= set(members):\n"
-                "    raise ValueError(f'bundle must carry {{sorted(required)}}; got {{sorted(members)}}')\n"
-                "artifact = validate_artifact_bundle(ARTIFACT_DIR, expected_fitted_sha256=EXPECTED_FITTED_SHA256, expected_checkpoint_sha256=EXPECTED_CKPT_SHA256 or WEIGHTS_SHA256)\n"
-                "if artifact['verifiedSha256']['foundationCheckpoint'] != WEIGHTS_SHA256:\n"
-                "    raise RuntimeError('the bundled model.ckpt is not the pinned TabPFN-3 checkpoint carried by this notebook')\n"
-                "FEATURE_COLUMNS = list(artifact['featureColumns'])\n"
-                "TARGET_COLUMN = artifact['targetColumn']\n"
-                "CLASSES = [str(c) for c in artifact['classes']]\n"
-                "print({{'artifact_source': artifact_source, 'zip': zip_name, 'zip_sha256': zip_sha256[:16], 'members': sorted(members), 'mode': artifact.get('mode'), 'portableLoader': artifact.get('portableLoader'), 'baseModel': artifact.get('baseModel')}})\n"
-                "print({{'featureColumns': FEATURE_COLUMNS, 'targetColumn': TARGET_COLUMN, 'classes': CLASSES, 'fittedSha256': artifact['verifiedSha256']['fittedEstimator'][:16], 'ckptSha256': artifact['verifiedSha256']['foundationCheckpoint'][:16], 'recordedModelPath': artifact['recordedModelPath']}})"
+                "    artifact_source, zip_path = 'path', ARTIFACT_ZIP_PATH\n"
+                "elif UPLOAD_ARTIFACT:\n"
+                "    artifact_source, zip_path = 'upload', upload_one('the bundle ZIP', 'ARTIFACT_ZIP_PATH')\n"
+                "run_stage('artifact', source=artifact_source, zip_path=zip_path, expected_zip_sha256=EXPECTED_ZIP_SHA256, expected_fitted_sha256=EXPECTED_FITTED_SHA256, sample=SAMPLE_ARTIFACT)"
             ),
         },
         {
             "md": (
-                "## 5. Reconstruct the serving estimator from the bundle alone\n\n"
-                "`TabPFNClassifierPipeline.from_artifact` re-runs the bundle validation, rewrites the fitted archive's "
-                "recorded `model_path` — in a temporary copy, never the original — to point at the companion `model.ckpt` "
-                "beside it, and calls TabPFN's `load_fitted_tabpfn_model`. No network download is attempted for the "
-                "foundation weights: they come from the bundle (and were proven equal to the pinned checkpoint). The "
-                "in-context training rows travel inside the fitted archive; nothing is refit here. The reconstructed "
-                "class order must agree with the manifest, else the notebook stops."
-            ),
-            "code": (
-                "fresh = TabPFNClassifierPipeline.from_artifact(ARTIFACT_DIR, device=pipe.device, expected_checkpoint_sha256=WEIGHTS_SHA256)\n"
-                "if fresh.classes != CLASSES or fresh.feature_columns != FEATURE_COLUMNS:\n"
-                "    raise RuntimeError('reconstructed estimator disagrees with the manifest')\n"
-                "print({{'source': fresh.source, 'device': fresh.device, 'classes': fresh.classes, 'n_estimators': fresh.n_estimators, 'random_state': fresh.random_state, 'refit': False, 'network_fallback_for_weights': False}})"
+                "**What to notice:** `trusted_digest` (which fields were pinned), the members, the fitted-archive and checkpoint "
+                "digests, and the manifest summary — 12 features, three classes, `mode: zero-shot-icl`.\n\n"
+                "<details>\n<summary>Check your reasoning (open after answering)</summary>\n\n"
+                "`model.ckpt` is still bound: it must equal the pinned TabPFN-3 checkpoint, verified independently in Section 3. "
+                "The fitted archive is not: without `EXPECTED_FITTED_SHA256` or `EXPECTED_ZIP_SHA256`, its only check is the "
+                "manifest's own digest, which anyone who edits the archive can rewrite. Since the fitted archive is joblib — "
+                "code-capable — that is the file the trusted digest exists for.\n\n"
+                "</details>"
             ),
         },
         {
             "md": (
-                "## 6. Supply new unlabelled rows → validate → input manifest\n\n"
-                "Upload one CSV (or point `NEW_DATA_PATH` at one) containing exactly the artifact's feature columns and "
-                "no target, `prediction` or `proba_*` columns. `validate_new_rows` rejects duplicate, missing or extra "
-                "columns and infinite numeric values rather than silently dropping anything; the resulting input "
-                "manifest names the schema the artifact imposes, the row count, the column types and the verdict, and "
-                "is written to `outputs/{stem}_input_manifest.json`. To show what rejection looks like, the cell also "
-                "validates a probe with an extra column and records the structured finding."
+                "## 5. Rebuild the estimator from the bundle alone · [Concept]\n\n"
+                "`from_artifact` copies the fitted archive while pointing its recorded `model_path` at the verified `model.ckpt` "
+                "(the original is untouched), loads it with tabpfn's `load_fitted_tabpfn_model` (no refit, no download), and "
+                "checks that the reconstructed classes and feature columns equal the manifest's. This is serving-state "
+                "reconstruction, not training."
+            ),
+            "code": "run_stage('reconstruct')",
+        },
+        {
+            "md": "**What to notice:** `refit: False`, `network_fallback_for_weights: False`, the classes in stored order and the device.",
+        },
+        {
+            "md": (
+                "## 6. Supply new unlabelled rows → validate → input manifest · [Evaluation practice]\n\n"
+                "Set `NEW_DATA_PATH` (any runtime) or tick `UPLOAD_NEW_DATA` (Colab). With your own bundle and neither set, the "
+                "cell opens the upload dialog in Colab and, elsewhere, stops with a message naming `NEW_DATA_PATH`. List identifier "
+                "columns in `ID_COLUMNS` (for the E2E rows: `['record_id', 'category']`): they are kept beside the predictions and "
+                "never given to the model; an undeclared extra column is refused with a hint. `validate_new_rows` requires exactly "
+                "the fitted feature columns (any order), no target, `prediction` or `proba_<class>` column, and finite numbers; then "
+                "every feature the estimator saw as numeric must hold numbers — a value such as `abc` is refused naming the column "
+                "and the value. The **input manifest** (row count, features, identifiers, missing values, the file digest, and a "
+                "recorded refusal probe) is written to `outputs/{stem}_input_manifest.json`."
             ),
             "code": (
-                "NEW_DATA_PATH = ''  # @param {{type:\"string\"}}\n\n"
+                "NEW_DATA_PATH = ''  # @param {{type:\"string\"}}\n"
+                "UPLOAD_NEW_DATA = False  # @param {{type:\"boolean\"}}\n"
+                "ID_COLUMNS = []  # @param {{type:\"raw\"}}\n\n"
+                "rows_source, rows_path = 'sample', ''\n"
                 "if NEW_DATA_PATH:\n"
-                "    new_name, new_payload = Path(NEW_DATA_PATH).name, Path(NEW_DATA_PATH).read_bytes()\n"
-                "else:\n"
-                "    from google.colab import files\n"
-                "    uploaded = files.upload()\n"
-                "    if len(uploaded) != 1:\n"
-                "        raise RuntimeError('Upload exactly one CSV of new rows.')\n"
-                "    new_name, new_payload = next(iter(uploaded.items()))\n"
-                "raw_rows = pd.read_csv(io.BytesIO(new_payload))\n"
-                "new_rows = validate_new_rows(raw_rows, FEATURE_COLUMNS, target_column=TARGET_COLUMN, classes=CLASSES)\n"
-                "input_manifest = {{\n"
-                "    'schema': {{'format': 'CSV of unlabelled rows', 'columns': 'exactly the artifact feature columns, in any order', 'reserved': [TARGET_COLUMN, 'prediction', *[f'proba_{{c}}' for c in CLASSES]], 'numeric': 'finite values'}},\n"
-                "    'inputs': [{{'id': new_name, 'mode': 'artifact-inference', 'rows': int(len(new_rows)), 'feature_columns': FEATURE_COLUMNS, 'numeric_features': int(len(new_rows.select_dtypes(include=np.number).columns)), 'missing_values': {{k: int(v) for k, v in new_rows.isna().sum().items() if v}}, 'sha256': sha256_hex(new_payload)}}],\n"
-                "    'verdict': 'accepted',\n"
-                "    'findings': [],\n"
-                "    'model_id': MODEL_ID,\n"
-                "    'model_revision': MODEL_REVISION,\n"
-                "}}\n"
-                "try:\n"
-                "    validate_new_rows(new_rows.assign(unexpected_column=0), FEATURE_COLUMNS, target_column=TARGET_COLUMN, classes=CLASSES)\n"
-                "except InputRejected as exc:\n"
-                "    input_manifest['findings'].append({{'input': 'extra-column-probe', **exc.finding}})\n"
-                "with open('outputs/{stem}_input_manifest.json', 'w', encoding='utf-8') as handle:\n"
-                "    json.dump(input_manifest, handle, indent=2, ensure_ascii=False, default=str)\n"
-                "print(json.dumps(input_manifest['inputs'][0], indent=2, default=str))\n"
-                "print('findings:', json.dumps(input_manifest['findings'], indent=2, default=str))"
+                "    rows_source, rows_path = 'path', NEW_DATA_PATH\n"
+                "elif UPLOAD_NEW_DATA or artifact_source != 'sample':\n"
+                "    rows_source, rows_path = 'upload', upload_one('one unlabelled CSV for your bundle', 'NEW_DATA_PATH')\n"
+                "run_stage('rows', source=rows_source, path=rows_path, id_columns=ID_COLUMNS)"
+            ),
+        },
+        {
+            "md": "**What to notice:** the input manifest with 8 rows, the 12 features, `id_columns`, and the `extra-column-probe` finding.",
+        },
+        {
+            "md": (
+                "## 7. Predict, report what cannot be measured, and export · [Concept]\n\n"
+                "The `predict` stage scores the rows. `prediction` is the `argmax` label and one `proba_<class>` column per class "
+                "follows **in the bundle's stored class order**; the probabilities are uncalibrated ensemble outputs and no "
+                "threshold is shipped. Identifier columns come first, so the output joins back on your key. `evaluation_report` is "
+                "produced even here: with no labelled rows its verdict is `not-measurable`; its `sample_kind` is `sample` for the "
+                "pinned sample bundle and rows and `BYOD` otherwise. The result JSON records the bundle identity and its trust "
+                "record, the input manifest, the notebook's source, the pinned model identity, revision and licence, and the "
+                "runtime.\n\n"
+                "**Predict before running:** these are the E2E notebook's eight new rows. Will the probabilities equal its Section 9 "
+                "output?"
+            ),
+            "code": "run_stage('predict')",
+        },
+        {
+            "md": (
+                "**What to notice:** eight rows with the identifiers first, `prediction` and three probability columns summing to 1; "
+                "`verdict: not-measurable`.\n\n"
+                "**Checkpoint:** why is the verdict `not-measurable`, and what would make it measurable?\n\n"
+                "<details>\n<summary>Check your reasoning (open after answering)</summary>\n\n"
+                "The rows arrive without labels, as in deployment, so there is nothing to compare predictions with. A labelled "
+                "holdout whose classes all appear in the support rows, scored with `classification_metrics` against "
+                "`majority_class_baseline` (what the E2E notebook does), would make it measurable. With the same fitted state, "
+                "checkpoint and device the probabilities match the E2E notebook's up to floating-point differences.\n\n"
+                "</details>"
             ),
         },
         {
             "md": (
-                "## 7. Predict, report what cannot be measured, and export\n\n"
-                "`predict` returns `prediction` (the `argmax` class) and one `proba_<class>` column per class in the "
-                "artifact's stored class order; the probabilities are raw ensemble outputs, **not calibrated**, and no "
-                "threshold is shipped. Because the rows carry no labels, `evaluation_report` records the verdict "
-                "`not-measurable` and states what labelled data would make the task measurable — it does not invent a "
-                "score. It is written to `outputs/{stem}_evaluation_report.json`; the predictions go to "
-                "`outputs/{stem}_predictions.csv`, and `outputs/{stem}_result.json` records the artifact identity and "
-                "verified digests, the input manifest, the notebook's source, the pinned model identity, revision and "
-                "licence, and the runtime. No credentials are recorded."
+                "## 8. Optional activity: which check catches a tampered bundle? · [Concept]\n\n"
+                "**Predict → Change → Run → Observe → Explain.** **Predict:** for each `TAMPER` option — one byte of "
+                "`model.tabpfn_fit` flipped; the same flip with the manifest digest rewritten to match; an unlisted `notes.txt` "
+                "added to the ZIP — which check refuses it, if any? **Change:** tick `RUN_ACTIVITY` and pick `TAMPER`. **Run** "
+                "this cell. **Observe** `refused` and the message. **Explain** the role of the trusted digest. The activity "
+                "tampers with a copy; the verified bundle and the canonical outputs are untouched."
             ),
             "code": (
-                "predictions = fresh.predict(new_rows)\n"
-                "predictions.to_csv('outputs/{stem}_predictions.csv', index=False)\n"
-                "report = evaluation_report(None, n_validation=0, class_labels=CLASSES, sample_kind='BYOD')\n"
-                "with open('outputs/{stem}_evaluation_report.json', 'w', encoding='utf-8') as handle:\n"
-                "    json.dump(report, handle, indent=2, ensure_ascii=False)\n"
-                "payload = {{\n"
-                "    'artifact': {{k: artifact.get(k) for k in ('schemaVersion', 'taskType', 'targetColumn', 'featureColumns', 'classes', 'fittedEstimator', 'foundationCheckpoint', 'portableLoader', 'baseModel', 'mode', 'nEstimators', 'randomState')}},\n"
-                "    'artifact_verified_sha256': artifact['verifiedSha256'],\n"
-                "    'artifact_zip': {{'name': zip_name, 'sha256': zip_sha256, 'source': artifact_source}},\n"
-                "    'reconstruction': {{'loader': 'tabpfn_classifier_pipeline.TabPFNClassifierPipeline.from_artifact', 'device': fresh.device, 'network_fallback_for_weights': False, 'refit': False, 'decision_rule': DECISION_RULE}},\n"
-                "    'input_manifest': input_manifest,\n"
-                "    'evaluation_report': report,\n"
-                "    'scored_rows': int(len(predictions)),\n"
-                "    'notebook_source': NOTEBOOK_SOURCE,\n"
-                "    'repository_revision': NOTEBOOK_SOURCE['repository_revision'],\n"
-                "    'model_id': MODEL_ID,\n"
-                "    'model_revision': MODEL_REVISION,\n"
-                "    'model_license': MODEL_LICENSE,\n"
-                "    'model_file': WEIGHTS_FILE,\n"
-                "    'runtime': {{'python': platform.python_version(), 'torch': torch.__version__, 'tabpfn': importlib.metadata.version('tabpfn'), 'pandas': pd.__version__, 'device': fresh.device}},\n"
-                "}}\n"
-                "with open('outputs/{stem}_result.json', 'w', encoding='utf-8') as handle:\n"
-                "    json.dump(payload, handle, indent=2, ensure_ascii=False, default=str)\n"
-                "print(predictions.head(8).to_string(index=False))\n"
-                "print({{'verdict': report['verdict'], 'needs': report['needs']}})\n"
-                "print(sorted(os.listdir('outputs')))"
+                "RUN_ACTIVITY = False  # @param {{type:\"boolean\"}}\n"
+                "TAMPER = 'flip one byte of model.tabpfn_fit'  # @param [\"flip one byte of model.tabpfn_fit\", \"rewrite the manifest digest too\", \"add an unlisted member to the ZIP\"]\n"
+                "if RUN_ACTIVITY:\n"
+                "    run_stage('activity', tamper=TAMPER)\n"
+                "else:\n"
+                "    print('Optional activity skipped: tick RUN_ACTIVITY to run it. The canonical outputs are complete.')"
+            ),
+        },
+        {
+            "md": (
+                "**What to notice (if you ran it):** `refused` and the message for each option.\n\n"
+                "<details>\n<summary>Check your reasoning (open after running)</summary>\n\n"
+                "A flipped byte breaks the manifest's digest, so internal consistency catches it. Rewriting the manifest digest "
+                "defeats that check — but the activity validates against the trusted fitted digest recorded in Section 4, so the "
+                "change is still refused; without a trusted digest it would pass. An unlisted member is refused by the allowlist "
+                "before extraction. The lesson: internal digests catch accidents; only a digest you trust catches a forger.\n\n"
+                "</details>"
             ),
         },
     ],
     "closing": (
+        "## Troubleshooting · [Engineering]\n\n"
+        "| Symptom | Likely cause | What to do |\n"
+        "|---|---|---|\n"
+        "| Section 1–3 failures (platform, disk, `uv`, Hub download, digest) | as in the E2E notebook | See its Troubleshooting; never remove a pin, a hash or a manifest digest. |\n"
+        "| `Sample bundle verification failed before extraction` | a truncated download or a changed release asset | Run Section 4 again; if it persists, do not proceed (the pinned asset is never replaced, so a mismatch means the file is not the published one). |\n"
+        "| `HTTP Error` / `URLError` in Section 4 | no internet access to github.com | Enable internet access, or use your own bundle with `ARTIFACT_ZIP_PATH`. |\n"
+        "| `Trusted digest mismatch for …` | the file is not the one the digest was issued for | Do not proceed; obtain the bundle and digests from the producer again. |\n"
+        "| `EXPECTED_…_SHA256 must be 64 hexadecimal characters` | a truncated digest | Paste the full digest the E2E notebook printed. |\n"
+        "| `No trusted digest was supplied` (a warning) | your bundle without a digest | It runs, but only internal consistency is checked. |\n"
+        "| `ARTIFACT_ZIP_PATH … is not a file` | a wrong path | Point it at the E2E notebook's ZIP. |\n"
+        "| `a bundle holds exactly […] at the top level` / `occur more than once` | an extra, nested or missing member | Do not use it; re-export the bundle with the E2E notebook. |\n"
+        "| `unsafe archive member`, `archive expands to …`, `compression ratio …` | a malformed or hostile ZIP | Do not use it. |\n"
+        "| `unsupported manifest`, `manifest lacks …`, `… is missing or implausibly small`, `… SHA-256 … != manifest` | the files do not match the manifest | Re-export; never edit the manifest. |\n"
+        "| `the bundled model.ckpt is not the pinned TabPFN-3 checkpoint` | another checkpoint | Use a bundle built on the pinned checkpoint. |\n"
+        "| `reconstructed estimator disagrees with the manifest` | a corrupted archive or manifest | Re-export the bundle. |\n"
+        "| `The pinned sample rows match only the pinned sample bundle` / `upload dialog exists only in Google Colab: set NEW_DATA_PATH` | your bundle with no rows | Set `NEW_DATA_PATH` (or tick `UPLOAD_NEW_DATA` in Colab). |\n"
+        "| `[SCHEMA_MISMATCH] … If [...] are identifiers, list them in ID_COLUMNS` | an identifier column not declared | Add it to `ID_COLUMNS`. |\n"
+        "| `ID_COLUMNS … are fitted feature columns` / `… are not in the header` | a wrong `ID_COLUMNS` entry | Fix the names. |\n"
+        "| `[RESERVED_COLUMNS]` | the rows carry the target or a previous prediction | Supply unscored rows without the target. |\n"
+        "| `numeric feature … has N non-numeric value(s)` | text in a numeric column | Fix the values; leave missing cells empty. |\n\n"
         "## Interpretation and limits\n\n"
-        "A successful run proves that an independently supplied bundle is internally consistent with its manifest and "
-        "was produced on the pinned TabPFN-3 checkpoint, that the carried module reconstructs the estimator from the "
-        "bundle alone without refitting or downloading weights, and that schema-compatible new rows can be scored and "
-        "exported. It does **not** authenticate the producer, make untrusted serialised estimator state safe to load, "
-        "or establish predictive quality, calibration, fairness or production fitness — the evaluation report is "
-        "`not-measurable` by construction. Never bypass a failed digest, schema or archive-safety check; obtain a "
-        "correct bundle from a trusted producer.\n\n"
-        "Successful execution proves that the recorded repository revision's pipeline module, carried in this "
-        "notebook, can acquire and digest-verify the pinned checkpoint, validate an external bundle before "
-        "deserialisation, reconstruct the serving estimator, validate new rows and emit the shown machine-readable "
-        "outputs in the tested runtime — without the repository being reachable. It does **not** establish benchmark "
-        "superiority or anything about the quality of the artifact's training rows.\n\n"
-        "**Next experiments:** paste the producer's digests into the expected-digest fields and watch a tampered "
-        "bundle fail closed; supply rows with a missing feature column and read the structured rejection; compare the "
-        "probabilities of the same rows scored by the task-inference notebook's in-memory estimator and by this "
-        "reconstruction (they should agree to floating-point precision).\n\n"
+        "A successful run proves that the bundle passed the member allowlist, the archive-safety rules and the manifest's "
+        "schema, size and digest checks, that `model.ckpt` is byte for byte the pinned TabPFN-3 checkpoint, that the fitted "
+        "estimator was rebuilt from the bundle alone with its class order intact, and that schema- and type-compatible new "
+        "rows were scored with class probabilities under an explicit `argmax` decision rule — without the repository being "
+        "reachable. It does **not** authenticate the producer beyond the channel a trusted digest came through, or establish "
+        "predictive quality, robustness, calibration, fairness, or production fitness; the evaluation report says "
+        "`not-measurable` because no labels exist here, and the exported probabilities must not be thresholded without the "
+        "caller's own calibration data. Never bypass a failed archive, manifest, digest or schema check.\n\n"
+        "Successful execution proves that the recorded repository revision's package, carried in this notebook, can acquire "
+        "and digest-verify the pinned checkpoint, validate and reconstruct an external bundle, validate the supplied inference "
+        "table, execute the public prediction path and emit the shown machine-readable outputs in the tested runtime. It does "
+        "**not** establish benchmark superiority, deployment calibration, safety for high-consequence decisions, or production "
+        "fitness on an unseen domain.\n\n"
+        "## Conclusion · [Evaluation practice]\n\n"
+        "Write three sentences: what the digest checks and the member allowlist established about the bundle you used; what "
+        "the rebuild and the eight predictions show; and what you would need before trusting these probabilities for a "
+        "decision.\n\n"
+        "<details>\n<summary>Sample conclusion (open after writing yours)</summary>\n\n"
+        "The ZIP matched the digest the E2E notebook printed, held exactly the three expected members, and its `model.ckpt` "
+        "was the pinned checkpoint verified in Section 3, so every file I loaded is pinned. The estimator was rebuilt from the "
+        "fitted archive without refitting, kept its class order, and scored eight unseen rows with uncalibrated probabilities "
+        "while keeping their `record_id`; with no labels the report is correctly `not-measurable`. Before using these "
+        "probabilities for a decision I would need a labelled, domain-representative test set and calibration data to choose a "
+        "threshold.\n\n"
+        "</details>\n\n"
+        "**Next experiments:** paste a digest with one character changed and read the refusal; run the activity with each "
+        "`TAMPER` option; score your own rows with an identifier column listed in `ID_COLUMNS`.\n\n"
         "## References\n\n"
         f"- Repository README: https://github.com/kurtvalcorza/{REPO}/blob/main/README.md\n"
         f"- Repository model card: https://github.com/kurtvalcorza/{REPO}/blob/main/MODEL_CARD.md\n"
         f"- Weight provenance: https://github.com/kurtvalcorza/{REPO}/blob/main/docs/WEIGHTS.md\n"
+        f"- E2E companion (produces bundles): https://github.com/kurtvalcorza/{REPO}/blob/main/tutorials/tabpfn_classifier_colab.ipynb\n"
         "- Upstream model: https://huggingface.co/{MODEL_ID}\n"
         "- Upstream code: https://github.com/PriorLabs/TabPFN\n"
         "- TabPFN-3 technical report: https://arxiv.org/abs/2605.13986"

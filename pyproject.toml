@@ -37,6 +37,8 @@ src = ["src", "tests"]
 # restyle keep their own style.
 extend-exclude = [
   "tutorials/*.ipynb",
+  # Executed hosted-run evidence is recorded byte-for-byte, never restyled.
+  "docs/execution-evidence/**",
   "scripts/execute_notebook_release.py",
   "scripts/check_component_contracts.py",
   "tests/test_contract.py",

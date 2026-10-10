@@ -1,9 +1,8 @@
 """Static release-asset validation for the TabPFN-3 classifier DIMER pipeline.
 
-Checks the two STANDALONE tutorial notebooks (DIMER Notebook Specification 2.0 §4) — the `TASK-INFERENCE`
-tutorial (in-context inference on the pinned TabPFN-3 checkpoint; the private-worker fine-tune path is not
-carried) and its `ARTIFACT-INFERENCE` companion — the tutorial registry, model card, README, STATUS.md and
-weight documentation for source conformance and cross-document identity consistency, and runs the
+Checks the two STANDALONE tutorial notebooks (DIMER Notebook Specification 2.0 §4) — the `E2E`
+tutorial and its `ARTIFACT-INFERENCE` companion — the tutorial registry, model card, README, STATUS.md
+and weight documentation for source conformance and cross-document identity consistency, and runs the
 generator parity checks (PAR1–PAR3) for every notebook.
 
 This is source validation only. A PASS here is NOT clean-runtime execution evidence;
@@ -33,10 +32,10 @@ PACKAGE_DIR = "src/tabpfn_classifier_pipeline"  # the template's package_dir (de
 REPO_NAME = "tabpfn-classifier-pipeline"
 EXPECTED_MODEL_ID = "Prior-Labs/tabpfn_3"
 PIPELINE_CLASS = "TabPFNClassifierPipeline"
-# INF1: the exact load expression the model cell must use (a template's `model_load` may extend it).
-MODEL_LOAD_EXPR = f"{PIPELINE_CLASS}.from_pretrained(weights_dir=WEIGHTS_DIR)"
+# INF1: the exact load expression the E2E stage runner must use for the pinned checkpoint.
+MODEL_LOAD_EXPR = f"{PIPELINE_CLASS}.from_pretrained(weights_dir=run.weights / P.MODEL_KEY, n_estimators=n, random_state=seed)"
 # Additional 40-hex revisions a document may legitimately cite: the pinned validator / finetuner worker
-# commits of COMPONENTS.json (the private worker path the notebooks no longer take).
+# commits of COMPONENTS.json (the private worker path the notebooks do not take).
 KNOWN_SHAS: frozenset[str] = frozenset(
     (
         "4333bb8c1a18320e27bab6b4801cbdbde322fb53",  # tabpfn-classifier-dataset-validator (COMPONENTS.json)
@@ -45,10 +44,13 @@ KNOWN_SHAS: frozenset[str] = frozenset(
 )
 # Documents that must name the model id and the immutable revision.
 IDENTITY_DOCS = ("README.md", "MODEL_CARD.md", "docs/WEIGHTS.md")
-# MODEL_CARD_SPEC version the card on this branch declares (the 1.1 header lands on another branch).
+# MODEL_CARD_SPEC version the card on this branch declares.
 EXPECTED_CARD_SPEC = "1.1"
-# Direct-library use that must stay inside the carried module cells (G2: the notebook calls the
-# pipeline API, it does not reimplement it). Checked on every code cell except the embedded ones.
+# Heading of the card section that carries the immutable provenance.
+PROVENANCE_HEADING = "## Version pinning"
+# Direct-library use that must stay inside the carried package and stage runner (G2: the notebook's own cells call
+# `run_stage`, they do not reimplement the pipeline). Checked on every kernel code cell except the carrier. The install
+# cell opens the pinned uv wheel with zipfile (member read, never extractall), so zipfile itself is not listed.
 FORBIDDEN_OUTSIDE_MODULE = (
     "from huggingface_hub import",
     "import huggingface_hub",
@@ -60,127 +62,163 @@ FORBIDDEN_OUTSIDE_MODULE = (
     "FinetunedTabPFNClassifier",
     "load_fitted_tabpfn_model(",
     "save_fitted_tabpfn_model(",
-    "from sklearn.metrics import",
-    "from sklearn.datasets import",
-    "from sklearn.model_selection import",
+    "from sklearn",
+    "import sklearn",
+    "import torch",
     "accuracy_score(",
     "log_loss(",
     "roc_auc_score(",
     "balanced_accuracy_score(",
-    "zipfile.ZipFile(",
     "torch.load(",
     "GITHUB_TOKEN",
     "userdata.get(",
     "import train as worker",
     "DIMER_TABPFN_MODEL_PATH",
 )
-# One entry per generated notebook: its template module (tools/<template>.py), profile, Colab form
-# gates that must default to the non-interactive path, the machine-readable artifacts it must write
-# (OUT1-OUT3, DAT24, EVAL21), and the profile-specific code / learner-facing markers.
+# One entry per generated notebook: its template module (tools/<template>.py), profile, Colab form gates that must
+# default to the non-interactive path, the machine-readable artifacts its stage runner must write (OUT1-OUT3, DAT24,
+# EVAL21), the stage-runner and kernel-cell markers, and the learner-facing markers.
 NOTEBOOKS = {
     "tabpfn_classifier_colab.ipynb": {
         "template": "notebook_template",
-        "profile": "TASK-INFERENCE",
-        "byod_gates": ("USE_BYOD", "USE_BYOD_ROWS"),
+        "profile": "E2E",
+        "byod_gates": {"USE_BYOD": False, "BYOD_PATH": "", "USE_BYOD_ROWS": False, "NEW_DATA_PATH": "", "RUN_ACTIVITY": False},
+        "stages": ("weights", "data", "validate", "condition", "report", "export", "reload", "predict", "activity"),
         "expected_outputs": (
-            "outputs/tabpfn_classifier_input_manifest.json",
-            "outputs/tabpfn_classifier_evaluation_report.json",
-            "outputs/tabpfn_classifier_result.json",
-            "outputs/tabpfn_classifier_predictions.csv",
-            "outputs/tabpfn_classifier_artifact.zip",
+            "{STEM}_input_manifest.json",
+            "{STEM}_evaluation_report.json",
+            "{STEM}_result.json",
+            "{STEM}_predictions.csv",
+            "{STEM}_new_rows.csv",
         ),
-        "code_markers": (
-            "zip_path = build_synthetic_dataset(DATASET_DIR / 'synthetic.zip', rows=600, features=12, classes=3, seed=SAMPLE_SEED)",
-            "frames = read_dataset_zip(zip_path)",
-            "train_df, val_df = stratified_holdout(train_df, TARGET_COLUMN, VALIDATION_SPLIT, seed=SAMPLE_SEED)",
-            "print({'ceilings': {'MAX_TRAIN_ROWS': MAX_TRAIN_ROWS, 'MAX_FEATURES': MAX_FEATURES, 'MAX_CLASSES': MAX_CLASSES, 'MIN_CLASSES': MIN_CLASSES, 'MIN_ROWS_PER_CLASS': MIN_ROWS_PER_CLASS}, 'decision_rule': DECISION_RULE, 'model_version': MODEL_VERSION})",
-            "input_manifest = validate_inputs(train_df, TARGET_COLUMN, val=val_df, test=test_df, names=[dataset_origin['type']])",
-            "validate_inputs(train_df.rename(columns={TARGET_COLUMN: 'label'}), TARGET_COLUMN)",
-            "except InputRejected as exc:",
-            "pipe.fit(train_df[FEATURE_COLUMNS], train_df[TARGET_COLUMN], target_column=TARGET_COLUMN)",
-            "validation_metrics = pipe.evaluate(val_df[FEATURE_COLUMNS], val_df[TARGET_COLUMN])",
-            "baseline = majority_class_baseline(train_df[TARGET_COLUMN], val_df[TARGET_COLUMN], classes=CLASSES)",
-            "report = evaluation_report(validation_metrics, baseline=baseline, n_validation=len(val_df), class_labels=CLASSES, sample_kind=sample_kind, reload_check=reload_check)",
-            "artifact_manifest = pipe.save_artifact(ARTIFACT_DIR)",
-            "if artifact_manifest['foundationCheckpointSha256'] != WEIGHTS_SHA256:",
-            "checked = validate_artifact_bundle(FRESH_DIR, expected_checkpoint_sha256=WEIGHTS_SHA256)",
-            "fresh = TabPFNClassifierPipeline.from_artifact(FRESH_DIR, device=pipe.device, expected_checkpoint_sha256=WEIGHTS_SHA256)",
-            "reloaded_metrics = fresh.evaluate(val_df[FEATURE_COLUMNS], val_df[TARGET_COLUMN])",
-            "raise RuntimeError('The reloaded artifact does not reproduce the recorded validation metric. Do not ship this artifact.')",
-            "new_rows = validate_new_rows(new_rows, FEATURE_COLUMNS, target_column=TARGET_COLUMN, classes=CLASSES)",
-            "predictions = fresh.predict(new_rows)",
-            "'mode': 'zero-shot-icl'",
-            "'model_revision': MODEL_REVISION",
-            "'model_license': MODEL_LICENSE",
-            "importlib.metadata.version('tabpfn')",
+        "runner_markers": (
+            'STEM = "tabpfn_classifier"',
+            'DEFAULT_DROP_COLUMNS = ["record_id", "category"]',
+            "zip_path = P.build_synthetic_dataset(run.state / \"synthetic.zip\", rows=600, features=12, classes=3, seed=SEED)",
+            "P.validate_inputs(features_only(train), target, val=features_only(val), test=features_only(test), names=[origin[\"type\"]])",
+            "train, val = P.stratified_holdout(train, target, split, seed=SEED)",
+            "check_numeric_like(frame, name, [target, *drop, *text_columns])",
+            "[UNSEEN_CLASSES] classes absent from train.csv",
+            "P.validate_inputs(strip(train).rename(columns={target: \"label\"}), target)",
+            "baseline = P.majority_class_baseline(train[target], val[target], classes=classes)",
+            "metrics = pipe.evaluate(val[v[\"features\"]], val[target])",
+            "estimator class order differs from the validated class list",
+            "standardised_logistic_regression",
+            "report = P.evaluation_report(cond[\"validation\"], baseline=v[\"baseline\"], n_validation=len(val), class_labels=v[\"classes\"], sample_kind=data[\"sample_kind\"])",
+            "RUN7_DEVIATION",
+            "manifest = pipe.save_artifact(art)",
+            "zip_sha = P.zip_artifact_bundle(art, zip_path)",
+            'manifest["featureKinds"]',
+            "if manifest[\"foundationCheckpointSha256\"] != P.WEIGHTS_SHA256:",
+            "shutil.rmtree(fresh_dir, ignore_errors=True)",
+            "checked = P.validate_artifact_bundle(fresh_dir, expected_checkpoint_sha256=P.WEIGHTS_SHA256)",
+            "fresh = P.TabPFNClassifierPipeline.from_artifact(fresh_dir, device=reference[\"device\"], expected_checkpoint_sha256=P.WEIGHTS_SHA256)",
+            "np.testing.assert_allclose(proba, expected, rtol=RELOAD_RTOL, atol=RELOAD_ATOL",
+            '"maxAbsProbabilityDifference": diff',
+            "features = P.validate_new_rows(rows.drop(columns=passthrough), v[\"features\"], target_column=data[\"target\"], classes=v[\"classes\"])",
+            '"model_revision": P.MODEL_REVISION',
+            '"model_license": P.MODEL_LICENSE',
+            'importlib.metadata.version("tabpfn")',
+        ),
+        "kernel_markers": (
+            "USE_BYOD = False  # @param",
+            "BYOD_PATH = ''  # @param",
+            "TARGET_COLUMN = 'target'  # @param",
+            "DROP_COLUMNS = ['record_id', 'category']  # @param",
+            "TEXT_COLUMNS = []  # @param",
+            "N_ESTIMATORS = 4  # @param",
+            "USE_BYOD_ROWS = False  # @param",
+            "RUN_ACTIVITY = False  # @param",
+            "ACTIVITY_N_ESTIMATORS = 1  # @param",
+            "from google.colab import files",
+            "files.upload()",
+            "run_stage('data'",
+            "run_stage('validate')",
+            "run_stage('condition'",
+            "run_stage('report')",
+            "run_stage('export')",
+            "run_stage('reload')",
+            "run_stage('predict'",
+            "run_stage('activity'",
         ),
         "markdown_markers": (
             "**Capability:** supervised tabular classification by **in-context learning**",
-            "performs **no gradient update**",
-            "**The DIMER fine-tuning path of this pipeline is not carried here**",
+            "**no gradient update**",
             "**not calibrated probabilities**",
-            "ships no acceptance threshold",
-            "**no gradient update happens**",
-            "`majority_class_baseline` always predicts the most frequent training class",
-            "the verdict is `not-measurable`",
-            "`sample-sanity`",
-            "**including the in-context training rows**",
-            "gradient fine-tuning (the private DIMER worker path, dropped from this standalone notebook)",
+            "**Adaptation.**",
+            "proposed RUN7 deviation",
+            "**Identifiers are not features.**",
             "`tabpfn-3-license-v1.0`",
+            "majority-class baseline",
+            "standardised logistic regression",
+            "`sample-sanity`",
         ),
+        "forbidden_runner": (),
     },
     "tabpfn_classifier_artifact_inference_colab.ipynb": {
         "template": "notebook_template_artifact_inference",
         "profile": "ARTIFACT-INFERENCE",
-        "byod_gates": (),
+        "byod_gates": {"ARTIFACT_ZIP_PATH": "", "UPLOAD_ARTIFACT": False, "EXPECTED_ZIP_SHA256": "", "EXPECTED_FITTED_SHA256": "", "NEW_DATA_PATH": "", "UPLOAD_NEW_DATA": False, "RUN_ACTIVITY": False},
+        "stages": ("weights", "artifact", "reconstruct", "rows", "predict", "activity"),
         "expected_outputs": (
-            "outputs/tabpfn_classifier_artifact_inference_input_manifest.json",
-            "outputs/tabpfn_classifier_artifact_inference_evaluation_report.json",
-            "outputs/tabpfn_classifier_artifact_inference_result.json",
-            "outputs/tabpfn_classifier_artifact_inference_predictions.csv",
+            "{STEM}_input_manifest.json",
+            "{STEM}_evaluation_report.json",
+            "{STEM}_result.json",
+            "{STEM}_predictions.csv",
         ),
-        "code_markers": (
-            "ARTIFACT_ZIP_PATH = ''",
-            "EXPECTED_FITTED_SHA256 = ''",
-            "EXPECTED_CKPT_SHA256 = ''",
-            "NEW_DATA_PATH = ''",
-            "members = safe_extract_zip(zip_path, ARTIFACT_DIR)",
-            "artifact = validate_artifact_bundle(ARTIFACT_DIR, expected_fitted_sha256=EXPECTED_FITTED_SHA256, expected_checkpoint_sha256=EXPECTED_CKPT_SHA256 or WEIGHTS_SHA256)",
-            "if artifact['verifiedSha256']['foundationCheckpoint'] != WEIGHTS_SHA256:",
-            "fresh = TabPFNClassifierPipeline.from_artifact(ARTIFACT_DIR, device=pipe.device, expected_checkpoint_sha256=WEIGHTS_SHA256)",
-            "if fresh.classes != CLASSES or fresh.feature_columns != FEATURE_COLUMNS:",
-            "new_rows = validate_new_rows(raw_rows, FEATURE_COLUMNS, target_column=TARGET_COLUMN, classes=CLASSES)",
-            "validate_new_rows(new_rows.assign(unexpected_column=0), FEATURE_COLUMNS, target_column=TARGET_COLUMN, classes=CLASSES)",
-            "predictions = fresh.predict(new_rows)",
-            "report = evaluation_report(None, n_validation=0, class_labels=CLASSES, sample_kind='BYOD')",
-            "'refit': False",
-            "'network_fallback_for_weights': False",
-            "'model_revision': MODEL_REVISION",
-            "'model_license': MODEL_LICENSE",
+        "runner_markers": (
+            'STEM = "tabpfn_classifier_artifact_inference"',
+            'zip_sha = check_trusted_digest(zip_path, opts.get("expected_zip_sha256", ""), "EXPECTED_ZIP_SHA256")',
+            "members = check_members(P, zip_path)",
+            "Trusted digest mismatch",
+            "P.safe_extract_zip(zip_path, bundle)",
+            "artifact = P.validate_artifact_bundle(bundle, expected_fitted_sha256=expected_fitted, expected_checkpoint_sha256=P.WEIGHTS_SHA256)",
+            "the bundled model.ckpt is not the pinned TabPFN-3 checkpoint carried by this notebook",
+            "fresh = P.TabPFNClassifierPipeline.from_artifact(Path(art[\"bundle\"]), device=device, expected_checkpoint_sha256=P.WEIGHTS_SHA256)",
+            "frame = P.validate_new_rows(raw.drop(columns=id_columns), features, target_column=target, classes=classes)",
+            "frame = check_numeric_features(path.name, frame, feature_kinds(art, frame))",
+            "P.validate_new_rows(frame.assign(unexpected_column=0), features, target_column=target, classes=classes)",
+            "report = P.evaluation_report(None, n_validation=0, class_labels=fresh.classes, sample_kind=rows_state[\"sample_kind\"])",
+            "fetched = fetch_sample(run, opts.get(\"sample\") or {})",
+            "Sample bundle verification failed before extraction",
+            "SAMPLE_URL_PREFIX = \"https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/\"",
+            '"model_revision": P.MODEL_REVISION',
+            '"model_license": P.MODEL_LICENSE',
+        ),
+        "kernel_markers": (
+            "ARTIFACT_ZIP_PATH = ''  # @param",
+            "UPLOAD_ARTIFACT = False  # @param",
+            "EXPECTED_ZIP_SHA256 = ''  # @param",
+            "EXPECTED_FITTED_SHA256 = ''  # @param",
+            "NEW_DATA_PATH = ''  # @param",
+            "UPLOAD_NEW_DATA = False  # @param",
+            "ID_COLUMNS = []  # @param",
+            "from google.colab import files",
+            "files.upload()",
+            "run_stage('artifact'",
+            "run_stage('reconstruct')",
+            "run_stage('rows'",
+            "run_stage('predict')",
         ),
         "markdown_markers": (
-            "**Capability:** serving-state reconstruction from an externally produced DIMER TabPFN classifier bundle",
+            "**Capability:** serving-state reconstruction from an externally produced TabPFN-3 classifier bundle",
             "produced **outside this execution**",
-            "**No training, fine-tuning or in-context refitting occurs, and no artifact is created here.**",
+            "**No artifact is created here**",
             "**Trust boundary.**",
-            "**before** anything is",
-            "**not calibrated**",
-            "the verdict",
-            "`not-measurable`",
-            "artifact creation, in-notebook support fitting, fine-tuning, regression, calibrated probabilities",
+            "EXPECTED_FITTED_SHA256",
+            "verdict is `not-measurable`",
+            "artifact creation, in-notebook fitting, fine-tuning, regression, calibrated probabilities",
         ),
-        "forbidden_code": (
+        "forbidden_runner": (
             "build_synthetic_dataset(",
-            "save_artifact(",
-            "pipe.fit(",
-            "fresh.fit(",
             "stratified_holdout(",
+            "majority_class_baseline(",
+            "save_artifact(",
+            "zip_artifact_bundle(",
+            ".fit(",
         ),
     },
 }
-MODEL_CARD_PATH = "MODEL_CARD.md"
-PROVENANCE_HEADING = "## Version pinning"
-MODEL_CARD_LINK = "MODEL_CARD.md"
 
 # ---------------------------------------------------------------------------
 # Shared checks. Everything below is source/structure validation only. Passing
@@ -188,7 +226,7 @@ MODEL_CARD_LINK = "MODEL_CARD.md"
 # Specification 2.0; see docs/release-verification.md for the release gate.
 # ---------------------------------------------------------------------------
 
-NOTEBOOK_SPEC = "2.0"
+NOTEBOOK_SPEC = "2.2"
 ALLOWED_PROFILES = {"E2E", "ARTIFACT-INFERENCE", "TASK-INFERENCE", "MULTI-CAPABILITY", "SMOKE"}
 STATUS_TOKENS = ("Candidate", "Release-grade")
 PLACEHOLDER = re.compile(r"\b(TODO|TBD|FIXME)\b|Insert text here|Tooltip:", re.I)
@@ -220,56 +258,59 @@ REQUIRED_CARD_HEADINGS = [
     (6, "Risks and harms"),
     (6, "Use cases"),
 ]
-# Markers every standalone DIMER tutorial in this fleet must carry, independent of profile.
-# Matched on comment-stripped code, so a commented-out call does not count.
-COMMON_CODE_MARKERS = (
-    "PINS = [",
-    "NOTEBOOK_SOURCE = {",
-    "SKIP_INSTALL = os.environ.get('DIMER_NOTEBOOK_CI_PREINSTALLED') == '1'",
-    "subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', *PINS], check=True)",
-    "importlib.metadata.packages_distributions()",
-    "importlib.invalidate_caches()",
-    "platform.python_version()",
-    "torch.__version__",
-    "MANIFEST = {",
-    "if (MANIFEST['modelId'], MANIFEST['revision']) != (MODEL_ID, MODEL_REVISION):",
-    "WEIGHTS_DIR = DEFAULT_WEIGHTS_DIR",
-    "json.dump(MANIFEST, handle, indent=2)",
-    "fetched = stage_missing_files(WEIGHTS_DIR, allow_download=True)",
-    "snapshot = verify_snapshot(WEIGHTS_DIR)",
-    "'repository_revision': NOTEBOOK_SOURCE['repository_revision']",
-    "'notebook_source': NOTEBOOK_SOURCE",
-    "os.makedirs('outputs', exist_ok=True)",
-    "from google.colab import files",
-    "files.upload()",
-)
+# Learner-facing markers every standalone DIMER tutorial in this fleet must carry (guided layer: GDL1–GDL15).
 COMMON_MARKDOWN_MARKERS = (
     f"**Notebook specification:** DIMER Notebook Specification {NOTEBOOK_SPEC} — **standalone** (§4)",
-    "**Mode:** `",
+    "**Mode:** `GUIDED`",
     "**Run all:**",
     "**Bring Your Own Data:**",
     "**This notebook is standalone.**",
     "**Learning objectives:**",
+    "## How to use this notebook",
+    "**Who this notebook is for.**",
+    "## The task: Input → Model → Output",
+    "## Roadmap",
+    "<summary><strong>Glossary</strong>",
     "## Prerequisites",
     "Do not upload confidential or restricted",
-    "- **External access:** the Hugging Face Hub only",
-    "## 1. Install the pinned runtime",
-    "## 2. Pipeline code (carried verbatim from",
+    "- **External access:**",
+    "## 1. Check the runtime",
+    "## 2. Carry the code and build the isolated environment",
     "## 3. Pin, stage and verify the model",
+    "> **Infrastructure.**",
+    "Predict before running",
+    "**What to notice:**",
+    "Check your reasoning",
+    "## Troubleshooting",
     "## Interpretation and limits",
+    "## Conclusion",
     "Successful execution proves that the recorded repository revision",
     "without the repository being",
     "It does **not** establish benchmark superiority",
     "## References",
-    f"- Repository model card: https://github.com/kurtvalcorza/{REPO_NAME}/blob/main/{MODEL_CARD_LINK}",
+    f"- Repository model card: https://github.com/kurtvalcorza/{REPO_NAME}/blob/main/MODEL_CARD.md",
 )
-# Patterns that must never appear in tutorial code (comment-stripped), in any cell.
+# Isolated-runtime contract (RUN1, RUN10, ENV6; TDC-M1/TDCA-M2): markers the generator-owned install cell carries.
+ISOLATION_MARKERS = (
+    "--require-hashes",
+    "'--managed-python'",
+    "READY = VENV / '.dimer-ready'",
+    "environment_reused = READY.is_file() and READY.read_text().strip() == LOCK_SHA256",
+    "MPLBACKEND='Agg'",
+    "for name in ('PYTHONPATH', 'PYTHONHOME', 'PYTHONSTARTUP'",
+    "def run_stage(stage, **options):",
+)
+ST1_PATTERN = re.compile(
+    r"\bgit\b[^\n]*\bclone\b|github\.com/kurtvalcorza(?!/tabpfn-classifier-pipeline/releases/download/(?:sample-bundle-v\d+/[A-Za-z0-9_.-]+\.zip)?['\"])"
+)
+# Patterns that must never appear in tutorial code (comment-stripped), in any kernel cell or the stage runner.
 FORBIDDEN_PATTERNS = (
     ("credential in clone URL", re.compile(r"https://[^/'\"\s]*@github\.com/|x-access-token:")),
-    ("repository clone (ST1)", re.compile(r"\bgit\b[^\n]*\bclone\b|github\.com/kurtvalcorza")),
+    # The one allowed repository URL is a release-asset download of this repository (the pinned sample bundle, SART6;
+    # REL3: a pinned, SHA-256-verified release asset is not a repository clone or source fetch).
+    ("repository clone (ST1)", ST1_PATTERN),
     ("mutable git dependency (MOD14)", re.compile(r"git\+https?://(?![^\n]*@[0-9a-f]{40}\b)")),
     ("editable self-install", re.compile(r"""['"](?:-e|--editable)['"]|pip install (?:-e|--editable)\b""")),
-    ("repository package import (ST1)", re.compile(rf"^\s*(?:from|import)\s+{PACKAGE}\b", re.M)),
     ("mutable model reference (MOD14)", re.compile(r"revision\s*=\s*['\"](?:main|latest)['\"]")),
     ("trust_remote_code enabled", re.compile(r"trust_remote_code\s*[=:]\s*True")),
     (
@@ -279,13 +320,8 @@ FORBIDDEN_PATTERNS = (
     ("archive extractall", re.compile(r"\.extractall\s*\(")),
     ("notebook magic or shell escape", re.compile(r"(?m)^\s*[%!]|get_ipython\(\)")),
 )
-# Worker/clone paths that must never appear outside the generator-owned cells (Kurt 2026-09-13:
-# inference is in-notebook; no worker process, no clone of the repository).
-FORBIDDEN_OUTSIDE_MODULE_FLEET = (
-    "worker.run(",
-    "worker_cli(",
-    "subprocess.run([",
-)
+# In-kernel installs (TDC-M1): no pip into the notebook kernel, and no restart instruction anywhere.
+KERNEL_INSTALL = re.compile(r"['\"]-m['\"]\s*,\s*['\"]pip['\"]|^\s*[%!]\s*pip\b|['\"]pip install\b|\bpip\.main\(", re.M)
 
 
 class ValidationError(AssertionError):
@@ -382,18 +418,18 @@ def _primary_template() -> dict:
 
 
 def validate_model_card() -> None:
-    path = ROOT / MODEL_CARD_PATH
+    path = ROOT / "MODEL_CARD.md"
     text = _read(path)
-    _check(text.startswith("---\n"), f"{MODEL_CARD_PATH} must start with YAML front matter")
+    _check(text.startswith("---\n"), "MODEL_CARD.md must start with YAML front matter")
     front = text.split("---", 2)[1]
     for key in ("license:", "model_card_spec:", "base_model:"):
-        _check(key in front, f"{MODEL_CARD_PATH} missing front-matter field: {key}")
-    _check(f'model_card_spec: "{EXPECTED_CARD_SPEC}"' in front, f"{MODEL_CARD_PATH} model_card_spec must be {EXPECTED_CARD_SPEC}")
-    _check(f"base_model: {EXPECTED_MODEL_ID}" in front, f"{MODEL_CARD_PATH} base_model must equal MODEL_ID")
-    _check(not PLACEHOLDER.search(text), f"{MODEL_CARD_PATH} contains placeholder/scaffolding text")
-    _check(not UNSUPPORTED_CLAIMS.search(text), f"{MODEL_CARD_PATH} makes an unsupported release/benchmark claim")
+        _check(key in front, f"MODEL_CARD.md missing front-matter field: {key}")
+    _check(f'model_card_spec: "{EXPECTED_CARD_SPEC}"' in front, f"MODEL_CARD.md model_card_spec must be {EXPECTED_CARD_SPEC}")
+    _check(f"base_model: {EXPECTED_MODEL_ID}" in front, "MODEL_CARD.md base_model must equal MODEL_ID")
+    _check(not PLACEHOLDER.search(text), "MODEL_CARD.md contains placeholder/scaffolding text")
+    _check(not UNSUPPORTED_CLAIMS.search(text), "MODEL_CARD.md makes an unsupported release/benchmark claim")
     h1 = re.findall(r"(?m)^# (?!#)(.+)$", text)
-    _check(len(h1) == 1, f"{MODEL_CARD_PATH} must contain exactly one H1, got {len(h1)}")
+    _check(len(h1) == 1, f"MODEL_CARD.md must contain exactly one H1, got {len(h1)}")
     found = []
     for line in text.splitlines():
         match = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
@@ -409,7 +445,7 @@ def validate_model_card() -> None:
         _check(len(matches) == 1, f"required model-card heading missing/duplicated: {heading}")
         positions.append(matches[0])
     _check(positions == sorted(positions), "required model-card headings are out of order")
-    _check(PROVENANCE_HEADING in text, f"{MODEL_CARD_PATH} must carry a '{PROVENANCE_HEADING}' section")
+    _check(PROVENANCE_HEADING in text, f"MODEL_CARD.md must carry a {PROVENANCE_HEADING!r} section")
 
 
 def validate_identity_consistency() -> None:
@@ -508,52 +544,40 @@ def validate_release_status() -> None:
     )
 
 
-def _validate_notebook_structure(
-    path: Path, notebook: dict, spec: dict, template: dict, build
-) -> tuple[list[tuple[int, str, ast.Module]], str]:
+def _validate_notebook_structure(path: Path, notebook: dict, spec: dict, template: dict, build) -> tuple[list[tuple[int, str, ast.Module]], str]:
     _check(notebook.get("nbformat") == 4, f"{path.name}: nbformat must be 4")
     dimer = notebook.get("metadata", {}).get("dimer")
     _check(isinstance(dimer, dict), f"{path.name}: metadata.dimer block is required")
     profile = dimer.get("notebook_profile")
     _check(profile in ALLOWED_PROFILES, f"{path.name}: invalid metadata.dimer.notebook_profile {profile!r}")
     _check(profile == spec["profile"], f"{path.name}: profile {profile!r} != declared {spec['profile']!r}")
-    version = dimer.get("notebook_spec", dimer.get("notebook_spec_version"))
-    _check(version == NOTEBOOK_SPEC, f"{path.name}: metadata.dimer must declare notebook spec version '{NOTEBOOK_SPEC}'")
-    _check(dimer.get("notebook_mode") in ("REFERENCE", "GUIDED", "WORKSHOP"), f"{path.name}: metadata.dimer.notebook_mode must declare a §3.3 pedagogical mode")
+    _check(dimer.get("notebook_spec") == NOTEBOOK_SPEC, f"{path.name}: metadata.dimer must declare notebook spec version '{NOTEBOOK_SPEC}'")
+    _check(dimer.get("notebook_mode") == "GUIDED", f"{path.name}: metadata.dimer.notebook_mode must be GUIDED")
     _check(dimer.get("standalone") is True, f"{path.name}: metadata.dimer.standalone must be true (ST6)")
     generated = dimer.get("generated_from")
     _check(isinstance(generated, dict), f"{path.name}: metadata.dimer.generated_from is required (ST5)")
     _check(generated.get("repository") == REPO_NAME, f"{path.name}: generated_from.repository must be {REPO_NAME}")
     entry_rel = f"{PACKAGE_DIR}/{_entry_module(template)}"
     _check(generated.get("module") == entry_rel, f"{path.name}: generated_from.module must be {entry_rel}")
-    order = build._module_order(ROOT / PACKAGE_DIR, _modules(template))
-    module_rels = [f"{PACKAGE_DIR}/{m}" for m in order]
+    module_rels = [f"{PACKAGE_DIR}/{m}" for m in _modules(template) if m.endswith(".py")]
     _check(generated.get("modules") == module_rels, f"{path.name}: generated_from.modules must be {module_rels}")
-    module_sha = hashlib.sha256("".join(_read(ROOT / PACKAGE_DIR / m) for m in order).encode("utf-8")).hexdigest()
-    _check(
-        generated.get("module_sha256") == module_sha,
-        f"{path.name}: generated_from.module_sha256 does not match {PACKAGE_DIR}/ (PAR4: regenerate the notebook)",
-    )
-    _check(bool(generated.get("generator")), f"{path.name}: generated_from.generator is required")
+    module_sha = hashlib.sha256("".join(_read(ROOT / m) for m in module_rels).encode("utf-8")).hexdigest()
+    _check(generated.get("module_sha256") == module_sha, f"{path.name}: generated_from.module_sha256 does not match {PACKAGE_DIR}/ (PAR4: regenerate the notebook)")
+    _check(generated.get("generator", "").startswith("build_notebook.py/3"), f"{path.name}: generated_from.generator must be build_notebook.py/3 (isolated environment)")
     cells = notebook.get("cells", [])
-    _check(
-        bool(cells) and cells[0].get("cell_type") == "markdown",
-        f"{path.name}: first cell must be markdown",
-    )
+    _check(bool(cells) and cells[0].get("cell_type") == "markdown", f"{path.name}: first cell must be markdown")
     code_cells: list[tuple[int, str, ast.Module]] = []
     markdown_parts: list[str] = []
     for index, cell in enumerate(cells):
         source = _cell_source(cell)
         if cell.get("cell_type") == "markdown":
             markdown_parts.append(source)
+            _check("{{" not in source and "@P:" not in source and "{MODEL_ID}" not in source, f"{path.name}: unresolved template placeholder in markdown cell {index}")
             continue
         _check(cell.get("cell_type") == "code", f"{path.name}: unexpected cell type at {index}")
         _check(cell.get("execution_count") is None, f"{path.name}: code cell {index} has execution_count")
         _check(not cell.get("outputs"), f"{path.name}: code cell {index} persists outputs")
-        _check(
-            index > 0 and cells[index - 1].get("cell_type") == "markdown",
-            f"{path.name}: code cell {index} lacks a preceding explanatory markdown cell",
-        )
+        _check(index > 0 and cells[index - 1].get("cell_type") == "markdown", f"{path.name}: code cell {index} lacks a preceding explanatory markdown cell")
         for line in source.splitlines():
             _check(not line.lstrip().startswith(("%", "!")), f"{path.name}: cell {index} uses a magic")
         try:
@@ -568,152 +592,126 @@ def _validate_notebook_structure(
     return code_cells, markdown
 
 
-def _validate_gates(path: Path, code_cells: list[tuple[int, str, ast.Module]], gates: tuple[str, ...]) -> None:
-    """Each BYOD gate is assigned exactly once, to the constant False, on a Colab form line."""
-    for gate in gates:
-        assignments = []
-        for index, source, tree in code_cells:
-            lines = source.splitlines()
-            for node in ast.walk(tree):
-                if gate in _assignment_targets(node):
-                    line = lines[node.lineno - 1] if node.lineno - 1 < len(lines) else ""
-                    assignments.append((index, node, line))
-        _check(
-            len(assignments) == 1,
-            f"{path.name}: {gate} must be assigned exactly once, found {len(assignments)}",
-        )
-        index, node, line = assignments[0]
-        is_false = (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.value, ast.Constant)
-            and node.value.value is False
-        )
-        _check(is_false, f"{path.name}: {gate} must be assigned the constant False (cell {index})")
-        _check("# @param" in line, f"{path.name}: {gate} must be a Colab form parameter (`# @param`)")
-    for index, _source, tree in code_cells:
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                _check(
-                    not any(alias.name.startswith("google.colab") for alias in node.names),
-                    f"{path.name}: google.colab must only be imported inside the BYOD gate (cell {index})",
-                )
+def _carrier(path: Path, notebook: dict) -> tuple[int, dict[str, str], dict[str, str], dict[str, str]]:
+    """The single carrier cell (metadata.dimer.embedded_sources) and its CARRIED_FILES / CARRIED_BINARY / CARRIED_HASHES literals."""
+    tagged = [(i, c) for i, c in enumerate(notebook["cells"]) if c.get("cell_type") == "code" and c.get("metadata", {}).get("dimer", {}).get("embedded_sources")]
+    _check(len(tagged) == 1, f"{path.name}: exactly one carrier cell (metadata.dimer.embedded_sources) is required, found {len(tagged)}")
+    index, cell = tagged[0]
+    values: dict[str, dict] = {}
+    for node in ast.parse(_cell_source(cell)).body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and node.targets[0].id in ("CARRIED_FILES", "CARRIED_BINARY", "CARRIED_HASHES"):
+            values[node.targets[0].id] = ast.literal_eval(node.value)
+    _check(set(values) == {"CARRIED_FILES", "CARRIED_BINARY", "CARRIED_HASHES"}, f"{path.name}: the carrier cell must assign CARRIED_FILES, CARRIED_BINARY and CARRIED_HASHES literals")
+    return index, values["CARRIED_FILES"], values["CARRIED_BINARY"], values["CARRIED_HASHES"]
 
 
-def _validate_embedded_modules(path: Path, notebook: dict, build, template: dict) -> set[int]:
-    """PAR1: one tagged cell per carried module, in dependency order, each equal to its module after
-    the documented rewrites (generator /2 multi-module carrier; ST2 applied per module)."""
-    tagged = [
-        (index, cell)
-        for index, cell in enumerate(notebook.get("cells", []))
-        if cell.get("cell_type") == "code" and cell.get("metadata", {}).get("dimer", {}).get("embedded_module")
-    ]
+def carried_runner(notebook_path: Path) -> str:
+    """The stage runner text carried by a notebook (used by scripts/validate_colab_tutorial.py and the tests)."""
+    _, files, _, _ = _carrier(notebook_path, json.loads(_read(notebook_path)))
+    return files["tutorial_stages.py"]
+
+
+def _validate_carrier(path: Path, notebook: dict, build, template: dict) -> tuple[int, str]:
+    """PAR1/PAR2: every carried file equals the repository file it was generated from; hashes match the bytes."""
+    import base64
+
+    index, files, binary, hashes = _carrier(path, notebook)
     recorded = notebook["metadata"]["dimer"]["generated_from"]["revision"]
     context = build.load_context(ROOT, template, recorded)
-    expected_rels = context["module_rels"]
-    _check(
-        [cell["metadata"]["dimer"]["embedded_module"] for _, cell in tagged] == expected_rels,
-        f"{path.name}: the cells tagged metadata.dimer.embedded_module must be exactly {expected_rels}, in order (ST2)",
-    )
-    for (index, cell), module in zip(tagged, context["modules"], strict=True):
-        rel = f"{context['pkg_rel']}/{module}"
-        _check(
-            cell["metadata"]["dimer"].get("module_sha256") == context["per_module_sha256"][rel],
-            f"{path.name}: cell {index} module_sha256 tag does not match {rel}",
-        )
-        _check(
-            _cell_source(cell).rstrip("\n") + "\n" == context["embedded"][module],
-            f"{path.name}: embedded module cell {index} differs from {rel} (PAR1); regenerate the notebook",
-        )
-    return {index for index, _ in tagged}
+    _check(files == context["files"], f"{path.name}: carried files differ from the repository (PAR1); regenerate the notebook")
+    _check(binary == context["binary"], f"{path.name}: carried binary files differ from the repository (PAR1); regenerate the notebook")
+    for name, text in files.items():
+        _check(hashes.get(name) == hashlib.sha256(text.encode("utf-8")).hexdigest(), f"{path.name}: CARRIED_HASHES[{name!r}] does not match its text")
+    for name, data in binary.items():
+        _check(hashes.get(name) == hashlib.sha256(base64.b64decode(data)).hexdigest(), f"{path.name}: CARRIED_HASHES[{name!r}] does not match its bytes")
+    _check(json.loads(files[f"weights/{template['weights_key']}/dimer-base-manifest.json"]) == json.loads(_read(ROOT / "weights" / template["weights_key"] / "dimer-base-manifest.json")), f"{path.name}: carried manifest != committed manifest (PAR2)")
+    _check(files["tutorial_stages.py"] == _read(ROOT / template["stage_runner"]).replace("\r\n", "\n"), f"{path.name}: carried stage runner != {template['stage_runner']}")
+    lock = files["requirements.txt"]
+    build.check_lock(build._pins(ROOT), lock)
+    return index, files["tutorial_stages.py"]
 
 
-def _validate_identity(
-    path: Path, code_cells: list[tuple[int, str, ast.Module]], embedded: set[int], revision: str
-) -> None:
-    """Identity constants are bound in the carried module cells only; nothing outside rebinds them."""
-    for index, _source, tree in code_cells:
-        if index in embedded:
-            continue
-        for node in ast.walk(tree):
-            rebound = [name for name in _assignment_targets(node) if name in IDENTITY_NAMES]
-            _check(not rebound, f"{path.name}: {rebound} must not be rebound outside the module cells (cell {index})")
-    outside = "\n".join(source for index, source, _ in code_cells if index not in embedded)
-    manifest_block = re.search(r"^MANIFEST = (\{.*?^\})$", outside, re.M | re.S)
-    _check(manifest_block is not None, f"{path.name}: model cell must carry an inline MANIFEST literal (ST3)")
-    outside_without_manifest = outside.replace(manifest_block.group(0), "")
-    _check(
-        revision not in outside_without_manifest,
-        f"{path.name}: the model revision may appear only in the carried modules and the inline manifest",
-    )
-
-
-def _validate_parity(
-    path: Path, notebook: dict, code_cells: list[tuple[int, str, ast.Module]], build, template: dict
-) -> None:
-    """PAR2/PAR3: inline manifest and pins equal the repository's; the generator reproduces the file."""
-    code = "\n".join(source for _, source, _ in code_cells)
-    manifest = json.loads(_read(ROOT / "weights" / template["weights_key"] / "dimer-base-manifest.json"))
-    inline = re.search(r"^MANIFEST = (\{.*?^\})$", code, re.M | re.S)
-    _check(inline is not None and json.loads(inline.group(1)) == manifest, f"{path.name}: inline MANIFEST != committed manifest (PAR2)")
-    pins_block = re.search(r"^PINS = \[(.*?)^\]", code, re.M | re.S)
-    _check(pins_block is not None, f"{path.name}: install cell must carry PINS = [...] (ENV2)")
-    _check(re.findall(r"'([^']+)'", pins_block.group(1)) == build._pins(ROOT, template), f"{path.name}: inline PINS != declared runtime pins (PAR2)")
+def _validate_parity(path: Path, notebook: dict, build, template: dict) -> None:
+    """PAR3: the generator reproduces the committed file byte for byte."""
     recorded = notebook["metadata"]["dimer"]["generated_from"]["revision"]
     rendered = build.to_bytes(build.render(ROOT, template, recorded))
     current = path.read_bytes().replace(b"\r\n", b"\n")  # autocrlf checkouts are CRLF
     _check(current == rendered, f"{path.name}: differs from tools/build_notebook.py output (PAR3); regenerate")
 
 
-def _validate_bootstrap_guard(path: Path, code_cells: list[tuple[int, str, ast.Module]]) -> None:
-    """The stale-import guard must actually raise: `if stale:` whose body raises RuntimeError."""
-    raises = False
-    for _, _, tree in code_cells:
-        for node in ast.walk(tree):
-            if isinstance(node, ast.If) and isinstance(node.test, ast.Name) and node.test.id == "stale":
-                for sub in ast.walk(node):
-                    if isinstance(sub, ast.Raise) and isinstance(sub.exc, ast.Call):
-                        func = sub.exc.func
-                        if isinstance(func, ast.Name) and func.id == "RuntimeError":
-                            raises = True
-    _check(raises, f"{path.name}: install cell must raise RuntimeError when already-imported packages change")
+def _validate_gates(path: Path, code_cells: list[tuple[int, str, ast.Module]], gates: dict[str, object]) -> None:
+    """Each optional-input gate is assigned exactly once, to its non-interactive default, on a Colab form line; google.colab is
+    imported only inside a conditional branch (never on the default path)."""
+    for gate, default in gates.items():
+        assignments = []
+        for index, source, tree in code_cells:
+            lines = source.splitlines()
+            for node in tree.body:
+                if gate in _assignment_targets(node):
+                    assignments.append((index, node, lines[node.lineno - 1]))
+        _check(len(assignments) == 1, f"{path.name}: {gate} must be assigned exactly once at cell top level, found {len(assignments)}")
+        index, node, line = assignments[0]
+        ok = isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) and node.value.value == default and type(node.value.value) is type(default)
+        _check(ok, f"{path.name}: {gate} must default to {default!r} (cell {index})")
+        _check("# @param" in line, f"{path.name}: {gate} must be a Colab form parameter (`# @param`)")
+    for index, _source, tree in code_cells:
+        for node in tree.body:
+            if isinstance(node, ast.Import | ast.ImportFrom):
+                names = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module or ""]
+                _check(not any(n.startswith("google.colab") for n in names), f"{path.name}: google.colab must only be imported inside an optional branch (cell {index})")
 
 
-def _validate_notebook_content(
-    path: Path,
-    code_cells: list[tuple[int, str, ast.Module]],
-    markdown: str,
-    embedded: set[int],
-    spec: dict,
-    template: dict,
-) -> None:
-    model_id, _revision = _package_identity(template)
-    stripped = {index: _strip_comments(source) for index, source, _ in code_cells}
-    code = "\n".join(stripped.values())
-    install_index = min(stripped)  # the generator-owned install cell is the first code cell
-    outside = "\n".join(text for index, text in stripped.items() if index not in embedded)
-    outside_after_install = "\n".join(
-        text for index, text in stripped.items() if index not in embedded and index != install_index
-    )
-    missing = [marker for marker in COMMON_CODE_MARKERS + spec["code_markers"] if marker not in code]
-    _check(not missing, f"{path.name}: missing required source markers: {missing}")
-    present = [label for label, pattern in FORBIDDEN_PATTERNS if pattern.search(code)]
+def _validate_isolation(path: Path, notebook: dict, code_cells: list[tuple[int, str, ast.Module]], carrier_index: int) -> None:
+    """RUN1/RUN10/ENV6 (TDC-M1): nothing is pip-installed into the kernel, no restart is ever requested, the infrastructure
+    cells are collapsed and titled, and every learner cell runs a stage."""
+    text = json.dumps(notebook, ensure_ascii=False)
+    _check("Restart the runtime" not in text and "restart the runtime" not in text, f"{path.name}: must not instruct a runtime restart")
+    install = [src for _, src, _ in code_cells if src.startswith("# @title Infrastructure: build (or reuse) the isolated")]
+    _check(len(install) == 1, f"{path.name}: exactly one isolated-environment install cell is required")
+    missing = [m for m in ISOLATION_MARKERS if m not in install[0]]
+    _check(not missing, f"{path.name}: install cell lacks isolated-environment markers: {missing}")
+    for index, source, _tree in code_cells:
+        if index == carrier_index:
+            continue
+        _check(not KERNEL_INSTALL.search(_strip_comments(source)), f"{path.name}: cell {index} installs into the notebook kernel (RUN10)")
+    cells = notebook["cells"]
+    infra = [i for i, c in enumerate(cells) if c.get("cell_type") == "code" and _cell_source(c).startswith("# @title Infrastructure:")]
+    _check(len(infra) == 4, f"{path.name}: four Infrastructure cells (check, carrier, install, weights) are required, found {len(infra)}")
+    for i in infra:
+        _check(cells[i].get("metadata", {}).get("cellView") == "form", f"{path.name}: Infrastructure cell {i} must be collapsed (cellView: form, GDL11)")
+    learner = [i for i, src, _ in code_cells if i not in infra]
+    _check(bool(learner), f"{path.name}: no learner cells")
+    for i in learner:
+        src = next(s for j, s, _ in code_cells if j == i)
+        _check("run_stage(" in src, f"{path.name}: learner cell {i} must run a stage (run_stage)")
+
+
+def _validate_notebook_content(path: Path, code_cells: list[tuple[int, str, ast.Module]], markdown: str, carrier_index: int, runner: str, spec: dict, template: dict) -> None:
+    model_id, revision = _package_identity(template)
+    kernel = "\n".join(_strip_comments(source) for index, source, _ in code_cells if index != carrier_index)
+    runner_code = _strip_comments(runner)
+    stem = template["stem"]
+    missing = [m for m in spec["runner_markers"] if m not in runner_code]
+    _check(not missing, f"{path.name}: stage runner lacks required markers: {missing}")
+    kernel_raw = "\n".join(source for index, source, _ in code_cells if index != carrier_index)
+    missing = [m for m in spec["kernel_markers"] if m not in kernel_raw]
+    _check(not missing, f"{path.name}: notebook cells lack required markers: {missing}")
+    for stage in spec["stages"]:
+        _check(f'"{stage}": stage_{stage}' in runner_code, f"{path.name}: stage runner must define stage {stage!r}")
+    for name in spec["expected_outputs"]:
+        _check('f"' + name in runner_code, f"{path.name}: stage runner must export {name.format(STEM=stem)}")
+    present = [label for label, pattern in FORBIDDEN_PATTERNS if pattern.search(kernel) or pattern.search(runner_code)]
     _check(not present, f"{path.name}: forbidden/insecure source: {present}")
-    leaked = [marker for marker in FORBIDDEN_OUTSIDE_MODULE if marker in outside]
-    _check(not leaked, f"{path.name}: direct library use outside the carried module cells (G2): {leaked}")
-    worker = [marker for marker in FORBIDDEN_OUTSIDE_MODULE_FLEET if marker in outside_after_install]
-    _check(not worker, f"{path.name}: worker/subprocess path outside the generator-owned cells: {worker}")
-    forbidden = [marker for marker in spec.get("forbidden_code", ()) if marker in outside]
-    _check(not forbidden, f"{path.name}: profile-forbidden code outside the carried module cells: {forbidden}")
-    _check(
-        f"pipe = {MODEL_LOAD_EXPR}" in outside,
-        f"{path.name}: must load through {MODEL_LOAD_EXPR} (INF1)",
-    )
+    leaked = [m for m in FORBIDDEN_OUTSIDE_MODULE if m in kernel]
+    _check(not leaked, f"{path.name}: direct library use in the notebook's own cells (G2): {leaked}")
+    _check(revision not in kernel, f"{path.name}: the model revision may appear only in the carried files")
+    forbidden = [m for m in spec["forbidden_runner"] if m in runner_code]
+    _check(not forbidden, f"{path.name}: profile-forbidden code in the stage runner: {forbidden}")
+    if spec["profile"] == "E2E":
+        _check(MODEL_LOAD_EXPR in runner_code, f"{path.name}: the stage runner must load through {MODEL_LOAD_EXPR} (INF1)")
+    _check(not re.search(r"^\s*assert\b", runner_code, re.M), f"{path.name}: the stage runner must report verdicts, not assert (quality asserts abort BYOD runs)")
     _validate_gates(path, code_cells, spec["byod_gates"])
-    _validate_bootstrap_guard(path, code_cells)
-    for filename in spec["expected_outputs"]:
-        _check(filename in code, f"{path.name}: must export {filename}")
-    missing_md = [marker for marker in COMMON_MARKDOWN_MARKERS + spec["markdown_markers"] if marker not in markdown]
+    missing_md = [m for m in COMMON_MARKDOWN_MARKERS + spec["markdown_markers"] if m not in markdown]
     _check(not missing_md, f"{path.name}: missing learner-facing markers: {missing_md}")
     _check(f"**Profile:** `{spec['profile']}`" in markdown, f"{path.name}: markdown must state the profile")
     ref = template.get("model_host", {}).get("reference_url", f"https://huggingface.co/{model_id}")
@@ -724,10 +722,7 @@ def validate_notebooks() -> None:
     tutorials = ROOT / "tutorials"
     notebooks = sorted(tutorials.glob("*.ipynb"))
     names = sorted(NOTEBOOKS)
-    _check(
-        [p.name for p in notebooks] == names,
-        f"tutorial notebooks must be exactly {names}, found {[p.name for p in notebooks]}",
-    )
+    _check([p.name for p in notebooks] == names, f"tutorial notebooks must be exactly {names}, found {[p.name for p in notebooks]}")
     build = _load_tool("build_notebook")
     registry = _read(tutorials / "README.md")
     for path in notebooks:
@@ -737,17 +732,13 @@ def validate_notebooks() -> None:
         _check(template["profile"] == spec["profile"], f"tools/{spec['template']}.py profile must be {spec['profile']}")
         notebook = json.loads(_read(path))
         code_cells, markdown = _validate_notebook_structure(path, notebook, spec, template, build)
-        embedded = _validate_embedded_modules(path, notebook, build, template)
-        _model_id, revision = _package_identity(template)
-        _validate_identity(path, code_cells, embedded, revision)
-        _validate_parity(path, notebook, code_cells, build, template)
-        _validate_notebook_content(path, code_cells, markdown, embedded, spec, template)
+        carrier_index, runner = _validate_carrier(path, notebook, build, template)
+        _validate_parity(path, notebook, build, template)
+        _validate_isolation(path, notebook, code_cells, carrier_index)
+        _validate_notebook_content(path, code_cells, markdown, carrier_index, runner, spec, template)
         _check(f"`{path.name}`" in registry, f"{path.name} missing from tutorials/README.md")
         _check(f"`{spec['profile']}`" in registry, f"tutorials/README.md must record `{spec['profile']}`")
-    _check(
-        f"DIMER Notebook Specification {NOTEBOOK_SPEC}" in registry,
-        "tutorials/README.md must name the notebook spec version",
-    )
+    _check(f"DIMER Notebook Specification {NOTEBOOK_SPEC}" in registry, "tutorials/README.md must name the notebook spec version")
     _check("standalone" in registry.lower(), "tutorials/README.md must record that the notebooks are standalone")
 
 

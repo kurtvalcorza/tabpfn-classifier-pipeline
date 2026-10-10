@@ -1,9 +1,10 @@
-"""Per-repository template for tools/build_notebook.py (NOTEBOOK_SPEC 1.1 §3.6 standalone carrier) — TASK-INFERENCE.
+"""Per-repository template for tools/build_notebook.py /3 (NOTEBOOK_SPEC 2.2 §4 standalone, §25.13 isolated environment) — E2E.
 
-Only the task-specific prose and stage cells live here. Runtime install, the embedded pipeline module
-(``src/tabpfn_classifier_pipeline/pipeline.py``) and the base-model pin/stage/verify cell are produced by the
-generator from repository sources so they cannot drift from the package. Inference only: the pinned TabPFN-3
-checkpoint conditions on the training rows in context; the DIMER fine-tuning path (private worker) is not carried.
+The generator writes the infrastructure cells (runtime check, carrier, isolated install + stage runner, checkpoint
+staging) from repository files; this template holds the learner-facing prose, the guided layer and the learner
+cells. Every learner cell calls ``run_stage(...)``: the carried ``tools/tutorial_stages.py`` runs one stage per process
+in an isolated, hash-locked environment, so nothing is installed into the notebook kernel. The ARTIFACT-INFERENCE
+companion has its own template, ``tools/notebook_template_artifact_inference.py``.
 """
 # ruff: noqa: E501  -- markdown prose and code-cell text are kept on single lines for readable rendering
 
@@ -32,328 +33,462 @@ BADGES = [
     ("arXiv", "https://img.shields.io/badge/arXiv-2605.13986-b31b1b.svg", "https://arxiv.org/abs/2605.13986"),
 ]
 
-TEMPLATE = {
+
+
+UV = {
+    "version": "0.12.15",
+    "url": "https://files.pythonhosted.org/packages/1e/fd/432451d732917c49152a291de3ef171aa6b0f1a22d39780fb2c1f085ca4c/uv-0.12.15-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "bytes": 20081404,
+    "sha256": "aee9802f46bae436bd91751bb33ddeb379ef1596b5c19df193219d545d244b60",
+}
+ENVIRONMENT = {
     "package": "tabpfn_classifier_pipeline",
     "repo_name": REPO,
+    "weights_key": "tabpfn-3-classifier",
+    "modules": ["__init__.py", "pipeline.py"],
+    "entry_module": "pipeline.py",
+    "lock": "tutorials/requirements-colab.lock.txt",
+    "managed_python": "3.12.12",
+    "uv": UV,
+    "disk_gib": {"weights": 0.3, "environment": 8.0},
+    "runtime_modules": ["torch", "tabpfn", "numpy", "pandas", "scikit-learn"],
+    "install_flags": ["--only-binary", ":all:"],
+    "license_file": "NOTICE",
+}
+
+RUNTIME_PREREQ = (
+    "- **Runtime:** a fresh **Linux x86_64** runtime — Google Colab (CPU is enough for the default sample; a T4 GPU is used automatically when present), Kaggle or a Linux Jupyter kernel. The kernel's own Python version does not matter: the notebook installs nothing into it, and runs every stage with CPython 3.12.12 in an isolated environment built from {n_locked} hash-locked packages (`tabpfn` 8.1.0, `torch` 2.11.0 with its CUDA libraries, `numpy` 2.5.3, `pandas` 2.3.2, `scikit-learn` 1.9.0). About 0.3 GB of disk is needed for the checkpoint and about 8 GB for the isolated environment."
+)
+LICENCE_PREREQ = "- **Licence:** the TabPFN-3 weights are non-commercial (`tabpfn-3-license-v1.0`): testing, evaluation and internal benchmarking only. A bundle carries a byte copy of the checkpoint, so the same terms travel with it. Clear the licence before any production use. No credentials are needed: `Prior-Labs/tabpfn_3` is public and not access-gated."
+
+TEMPLATE = {
+    **ENVIRONMENT,
     "stem": "tabpfn_classifier",
     "notebook_name": "tabpfn_classifier_colab.ipynb",
-    "profile": "TASK-INFERENCE",
+    "profile": "E2E",
     "mode": "GUIDED",
+    "stage_runner": "tools/tutorial_stages.py",
     "run_all": (
-        "Selecting **Run all** in a fresh supported runtime installs the pinned dependencies, stages and digest-verifies the pinned TabPFN-3 checkpoint (an ungated download; the TabPFN-3 licence's non-commercial terms still apply to what you do with it), draws the deterministic synthetic 3-class table in code (600 rows, 12 features, seeded `train`/`val`/`test` split, no download), validates it into an input manifest, **fits the classifier in context on the training split** (support-row registration on the pinned checkpoint — TabPFN has no gradient route in this pipeline), evaluates on the held-out split against a majority-class baseline and writes the evaluation report, exports the artifact bundle and reloads it across a fresh boundary, scores new rows, and exports machine-readable results and provenance. No repository clone, DIMER worker or service, credential, upload dialog or configuration edit is required (NOTEBOOK_SPEC 2.0 §5)."
+        "Selecting **Run all** in a fresh Linux x86_64 runtime builds an isolated Python environment from the carried hash-locked requirements without touching the notebook kernel's own packages, then runs each stage below in its own process: it stages and digest-verifies the pinned TabPFN-3 checkpoint (an ungated download; the TabPFN-3 licence's non-commercial terms still apply to what you do with it), draws the deterministic synthetic 3-class table in code (600 rows, 12 numeric features, seeded `train`/`val`/`test` split, no download), validates it into an input manifest, **fits the classifier in context on the training split** (support-row registration on the pinned checkpoint, no gradient update), evaluates on the held-out split against a majority-class baseline and a logistic-regression reference and writes the evaluation report, exports the artifact bundle and reloads it in a fresh process with a probability-equivalence check, scores new rows and exports machine-readable results and provenance. No repository clone, DIMER worker or service, credential, upload dialog, configuration edit or runtime restart is required (NOTEBOOK_SPEC 2.2 §5). No hosted run of this revision has been recorded yet."
     ),
     "byod": (
-        "Two optional branches, both off by default and never part of the default path: `USE_BYOD = True` (or `BYOD_ZIP_PATH`) in Section 4 supplies your own labelled table (a ZIP with `train.csv`/`val.csv`/`test.csv`, or a single `train.csv` that is split with a seeded stratified hold-out) which enters the same validation, in-context fitting, evaluation, export and fresh-reload cells as the synthetic sample; `USE_BYOD_ROWS = True` (or `NEW_DATA_PATH`) in Section 9 scores your own unlabelled rows with the reloaded estimator. Expected schema, ceilings and privacy guidance are stated in the Prerequisites and in those cells; uploads stay inside this runtime."
+        "Both optional branches are off by default and never part of the default path. `USE_BYOD = True` in Section 4 takes your own labelled table by `BYOD_PATH` (a ZIP with `train.csv` and optional `val.csv`/`test.csv`, a single `train.csv`, or a directory holding them — paths work in Colab, Kaggle and Jupyter) or, in Colab, an upload dialog; name the label in `TARGET_COLUMN` and list identifier columns in `DROP_COLUMNS` (kept beside the predictions, never given to the model). A missing target, duplicate columns, a class in `val.csv`/`test.csv` that `train.csv` lacks, or a numeric column with a few stray strings stop Section 4 or 5 with a coded message naming the file. `USE_BYOD_ROWS = True` in Section 9 scores your own unlabelled rows. Uploads stay inside this runtime."
     ),
-    "pipeline_class": "TabPFNClassifierPipeline",
-    "weights_key": "tabpfn-3-classifier",
-    "runtime_imports": ["torch", "pandas", "sklearn"],
-    "title": "TabPFN-3 Classifier — DIMER task-inference tutorial (standalone)",
+    "title": "TabPFN-3 Classifier — DIMER E2E tabular classification tutorial (standalone)",
     "badges": BADGES,
-    "capability": "supervised tabular classification by **in-context learning** with the pinned `Prior-Labs/tabpfn_3` classifier checkpoint: the labelled training rows are the support set, no gradient update, `argmax` decision over uncalibrated class probabilities, a `model.tabpfn_fit` + `model.ckpt` + `artifact_manifest.json` bundle reloaded across a fresh boundary",
+    "capability": "supervised tabular classification by **in-context learning** with the pinned `Prior-Labs/tabpfn_3` classifier checkpoint: validated support rows, no gradient update, evaluation against trivial and classical baselines, an `argmax` decision over uncalibrated class probabilities, and a `model.tabpfn_fit` + `model.ckpt` + `artifact_manifest.json` bundle reloaded in a fresh process",
     "intro": (
         "TabPFN-3 is a Transformer trained on a prior over synthetic tabular tasks so that it performs supervised "
         "classification in a single forward pass: `fit` registers your labelled training rows as the in-context "
         "support and performs **no gradient update**; query rows attend to that support and the head emits class "
-        "probabilities. This notebook is **inference-only**: it runs that in-context path through the carried "
-        "`tabpfn_classifier_pipeline` module against the pinned, digest-verified TabPFN-3 checkpoint. **The DIMER "
-        "fine-tuning path of this pipeline is not carried here**: it lives in the private `tabpfn-classifier-finetuner` "
-        "worker, and the TabPFN-3 weights are released under `tabpfn-3-license-v1.0`, whose Non-Commercial Purpose "
-        "excludes production deployment — so this tutorial is testing-and-evaluation material and carries no private "
-        "code. The carried module owns the pinned snapshot scheme, the input contract, the ICL fit / predict / evaluate "
-        "calls, the artifact bundle the serving path consumes (with its pre-load validation) and the evaluation report. "
-        "Sample metrics on synthetic data are tutorial sanity evidence only, not benchmark or production evidence; "
-        "`predict_proba` returns raw TabPFN ensemble outputs that are **not calibrated probabilities** and the pipeline "
-        "ships no acceptance threshold."
+        "probabilities. `n_estimators` averages several passes over differently preprocessed views of the table. The "
+        "carried package owns the pinned snapshot scheme, the input contract, the in-context fit / predict / evaluate "
+        "calls, the artifact bundle the serving path consumes (with its pre-load validation) and the evaluation report.\n\n"
+        "**Adaptation.** The production DIMER pipeline can also fine-tune TabPFN by gradient descent (Prior Labs' "
+        "`FinetunedTabPFNClassifier`, default on in `dimer-pipeline.json`, on a large GPU). This tutorial does not: "
+        "in-context conditioning is its adaptation — the same path production falls back to without a large GPU. That is "
+        "a proposed RUN7 deviation, recorded in the evaluation report and pending the maintainer's approval. The TabPFN-3 "
+        "weights are released under `tabpfn-3-license-v1.0`, whose Non-Commercial Purpose excludes production "
+        "deployment, so this tutorial is testing-and-evaluation material. Sample metrics on synthetic data are tutorial "
+        "sanity evidence only; `predict_proba` returns raw ensemble outputs that are **not calibrated probabilities** and "
+        "the pipeline ships no acceptance threshold."
     ),
     "learning_objectives": (
-        "install the pinned runtime, read what the carried module guarantees, resolve and digest-verify the immutable "
-        "TabPFN-3 checkpoint, generate the synthetic sample or supply a train/val/test ZIP through the archive-safety "
-        "rules, validate it into an input manifest with a recorded rejection, fit in context and read accuracy, "
-        "balanced accuracy, log loss and ROC-AUC against the majority-class baseline, export the artifact bundle and "
-        "prove that it reloads across a fresh boundary and reproduces the recorded metric, score genuinely new rows "
-        "under the `argmax` rule, and export machine-readable outputs plus provenance."
+        "by the end of this notebook you will be able to —\n\n"
+        "1. **Explain** what in-context learning means for TabPFN: what `fit` does and does not do (Section 6).\n"
+        "2. **Diagnose** an invalid table from a coded validation finding, and explain why an identifier column must never "
+        "be a feature (Sections 4, 5).\n"
+        "3. **Compare** TabPFN with a majority-class baseline and a logistic-regression reference on the same rows, using "
+        "error counts and the one-row resolution (Section 7).\n"
+        "4. **Interpret** accuracy, balanced accuracy, log loss and ROC-AUC, and say why the probabilities are uncalibrated "
+        "(Sections 6, 7).\n"
+        "5. **Verify** that the exported bundle rebuilds the same probabilities in a fresh process (Section 8).\n"
+        "6. **Apply** the bundle to new rows and keep your identifiers beside the predictions (Section 9).\n"
+        "7. **Predict**, run and **explain** the effect of the ensemble size in an optional activity (Section 10).\n"
+        "8. **Write** an evidence-based conclusion that names the baselines and the limits of one synthetic table "
+        "(Conclusion)."
     ),
     "exclusions": (
-        "gradient fine-tuning (the private DIMER worker path, dropped from this standalone notebook), regression, "
-        "calibrated probabilities, the v2 / v2.5 / v2.6 generations (only the pinned v3 checkpoint is carried), "
-        "temporal or grouped splitting, or any quality claim beyond one holdout of one table."
+        "gradient fine-tuning (see **Adaptation** above), regression, calibrated probabilities, the v2 / v2.5 / v2.6 "
+        "generations (only the pinned v3 checkpoint is carried), temporal or grouped splitting, or any quality claim "
+        "beyond one holdout of one table."
     ),
     "prerequisites": [
-        "- **Runtime:** Python 3.11+ (Google Colab or Jupyter). CPU is sufficient for the default sample; CUDA is used automatically when present. The pinned `torch==2.11.0` install is the largest download of the run; the checkpoint is 203 MiB.",
-        "- **Knowledge:** basic Python and pandas, the train/val/test convention, and what accuracy, balanced accuracy and log loss mean.",
-        "- **Data:** the default path draws a deterministic synthetic 3-class table (600 rows, 12 features, `train.csv`/`val.csv`/`test.csv`) in code and needs no download and no private data; a gated BYOD path accepts one ZIP with the same layout (or a single `train.csv`, from which a seeded stratified holdout is drawn). Do not upload confidential or restricted data to a hosted notebook environment unless you are authorized to do so. Uploaded inputs remain in the notebook runtime; this pipeline does not send them to a third-party inference API.",
-        "- **Licence:** the TabPFN-3 weights are non-commercial (`tabpfn-3-license-v1.0`): testing, evaluation and internal benchmarking only. Clear the licence before any production use.",
-        "- **Credentials:** none. `Prior-Labs/tabpfn_3` is public and not access-gated.",
+        RUNTIME_PREREQ,
+        "- **Knowledge:** basic Python and pandas, the train/val/test convention, and how to read a printed dictionary. The metrics and in-context learning are explained where they are first used, and the glossary collects them.",
+        "- **Model file:** `tabpfn-v3-classifier-v3_default.ckpt` (203 MiB) plus the licence, README and config of the snapshot, staged at a fixed revision and digest-verified in Section 3.",
+        "- **Data:** the default path draws a deterministic synthetic 3-class table (600 rows, 12 numeric features, `train.csv`/`val.csv`/`test.csv`, plus a `record_id` identifier and a `category` column derived from the row index, both dropped from the features) in code and needs no download and no private data. BYOD (one labelled ZIP, `train.csv` or directory) is off by default. Do not upload confidential or restricted data to a hosted notebook environment unless you are authorized to do so. Uploaded inputs remain in the notebook runtime; this pipeline does not send them to a third-party inference API.",
+        LICENCE_PREREQ,
     ],
+    "guided": {
+        "opening": [
+            (
+                "## How to use this notebook\n\n"
+                "**Who this notebook is for.** Learners who can run cells in a hosted notebook and read short Python and pandas, "
+                "and who want to see a tabular foundation model used end to end: validated data, in-context fitting, honest "
+                "evaluation against simple references, and a reusable bundle checked across a fresh boundary. No experience with "
+                "transformers is assumed; the glossary below explains every term.\n\n"
+                "**Running it.** Choose *Runtime → Run all*. The default path needs no edit, no upload, no account, no token and "
+                "no runtime restart. Section 2 builds an isolated environment, which takes the longest. You can also run one cell "
+                "at a time with *Shift + Enter*.\n\n"
+                "**Where the code runs.** The notebook kernel installs nothing and imports no model library. Each learner cell "
+                "calls `run_stage('…')`, which runs one stage of the carried stage runner in its own process with the isolated "
+                "environment's Python, streams what it prints, and stops the notebook with the stage's own error message if it "
+                "fails. Stages hand results to each other only through files.\n\n"
+                "**Two kinds of cell.** *Learner cells* (Sections 4–10) are the machine-learning workflow. *Infrastructure cells* "
+                "(Sections 1–3) are collapsed and titled **Infrastructure**; you may run them without studying their "
+                "implementation.\n\n"
+                "**Form controls.** `USE_BYOD`, `BYOD_PATH`, `TARGET_COLUMN`, `DROP_COLUMNS`, `TEXT_COLUMNS` and "
+                "`VALIDATION_SPLIT` (Section 4); `N_ESTIMATORS` and `SEED` (Section 6); `USE_BYOD_ROWS` and `NEW_DATA_PATH` "
+                "(Section 9); `RUN_ACTIVITY` and `ACTIVITY_N_ESTIMATORS` (Section 10). Leave them at their defaults for the first "
+                "run.\n\n"
+                "**Section tags.** **[Concept]** — what the model does and why. **[Evaluation practice]** — how the evidence is "
+                "produced and how to read it. **[Engineering]** — reproducibility, provenance and packaging.\n\n"
+                "**Predict, then check.** Before Sections 6 and 7 a **Predict before running** prompt asks you to commit to an "
+                "expectation; **What to notice** follows each stage; a collapsed **Check your reasoning** answer follows each "
+                "checkpoint."
+            ),
+            (
+                "## The task: Input → Model → Output\n\n"
+                "| Stage | Input | Model / system | Output |\n"
+                "|---|---|---|---|\n"
+                "| **Validate** | a labelled table (train / val / test) | `validate_inputs` with coded findings; identifiers set aside | an input manifest; 420 support, 90 validation and 90 test rows |\n"
+                "| **Fit in context** | the support rows | TabPFN-3 registering them as context (`n_estimators=4`) | class probabilities for any query row |\n"
+                "| **Evaluate** | validation and test rows | `classification_metrics`, majority baseline, logistic regression | metrics, error counts, an evaluation report |\n"
+                "| **Package** | fitted state + checkpoint + manifest | `save_artifact`, `validate_artifact_bundle`, `from_artifact` | a bundle that rebuilds the same probabilities |\n"
+                "| **Score** | new unlabelled rows (+ identifiers) | the rebuilt estimator | `prediction` + `proba_<class>` per row, identifiers kept |\n\n"
+                "## Roadmap\n\n"
+                "| Section | Tag | What happens | What you read |\n"
+                "|---|---|---|---|\n"
+                "| 1. Check the runtime | [Engineering] | Linux x86_64, GPU and disk; a run directory | the machine |\n"
+                "| 2. Carry the code, build the environment | [Engineering] | carried files verified; an isolated hash-locked environment | versions |\n"
+                "| 3. Pin, stage and verify the model | [Engineering] | the 203 MiB checkpoint downloaded at a fixed revision, digest-checked | identity and digest |\n"
+                "| 4. Prepare the dataset | [Concept] | the synthetic table (or your files); identifiers set aside | split sizes, class counts |\n"
+                "| 5. Validate | [Evaluation practice] | input manifest; a refusal probe; majority baseline | the manifest |\n"
+                "| 6. Fit in context and evaluate | [Concept] | validation and test metrics | the metrics |\n"
+                "| 7. Baselines and report | [Evaluation practice] | logistic-regression reference, error counts, the evaluation report | the principal result |\n"
+                "| 8. Export and fresh reload | [Engineering] | bundle exported, rebuilt in a new process, probabilities compared | the reload check and the digests |\n"
+                "| 9. Score new rows | [Engineering] | eight rows (or your file) scored by the rebuilt bundle | the output contract |\n"
+                "| 10. Optional activity | [Concept] | a different ensemble size (off by default) | your comparison |\n"
+                "| Troubleshooting | [Engineering] | common failures and what to do | when something fails |\n"
+                "| Interpretation and conclusion | [Evaluation practice] | limits and an evidence-based conclusion | your conclusion |\n\n"
+                "**Fast path.** Run all, then read Sections 6, 7 and 8 and the conclusion."
+            ),
+            (
+                "<details>\n"
+                "<summary><strong>Glossary</strong> — open when a term is unfamiliar</summary>\n\n"
+                "| Term | Meaning in this notebook |\n"
+                "|---|---|\n"
+                "| **In-context learning (ICL)** | Predicting from labelled rows shown to the model at prediction time; `fit` only registers them. |\n"
+                "| **Support set** | The labelled rows the model reads; here the 420-row training split. |\n"
+                "| **Ensemble members (`n_estimators`)** | Passes over differently preprocessed views of the table, averaged into one prediction. |\n"
+                "| **Identifier column** | A key such as `record_id` that names a row but carries no signal; it must never be a feature. |\n"
+                "| **Coded finding** | A validation result with a stable code (`TARGET_MISSING`, `UNSEEN_CLASSES`, …) and the observed value. |\n"
+                "| **Majority-class baseline** | Always predict the most frequent training class. |\n"
+                "| **Logistic regression** | A linear classical model on the standardised numeric features: the non-trivial reference. |\n"
+                "| **One-row resolution** | 1 / (rows in the split): the smallest possible change in accuracy. 90 rows → 0.0111. |\n"
+                "| **Accuracy / balanced accuracy** | Correct rows / all rows; balanced accuracy averages per-class recall. |\n"
+                "| **Log loss** | Average negative log probability of the true class; lower is better; punishes confident mistakes. |\n"
+                "| **ROC-AUC (one-vs-rest)** | Ranking quality, threshold-free, averaged over one-class-vs-rest problems. |\n"
+                "| **Uncalibrated probability** | A score not guaranteed to match observed frequencies. |\n"
+                "| **Fitted archive (`model.tabpfn_fit`)** | The fitted estimator state without the foundation weights. |\n"
+                "| **Foundation checkpoint (`model.ckpt`)** | A byte copy of the pinned TabPFN-3 checkpoint, bound by its SHA-256. |\n"
+                "| **Digest (SHA-256)** | A fingerprint of a file's bytes. |\n"
+                "| **Hash-locked environment / stage** | The isolated Python environment every stage runs in; one workflow step run as its own process. |\n"
+                "| **BYOD** | Bring Your Own Data. |\n\n"
+                "</details>"
+            ),
+        ],
+    },
     "cells": [
         {
             "md": (
-                "## 4. Prepare the dataset: default synthetic sample or bring your own\n\n"
-                "The expected input is one `train.csv` with a declared categorical target column, plus optional "
-                "`val.csv` and `test.csv` with identical columns (explicit splits are preserved, never re-split). Column "
-                "names must be unique, the target must have no missing values and at least `MIN_CLASSES` classes with "
-                "`MIN_ROWS_PER_CLASS` rows each, and numeric features must be finite; every other column is a feature "
-                "(numeric or string categorical). With `USE_BYOD = False` the carried module draws the deterministic "
-                "synthetic sample (`build_synthetic_dataset`: scikit-learn `make_classification`, seed `SAMPLE_SEED`) "
-                "as a ZIP; with `USE_BYOD = True` a ZIP is taken from `BYOD_ZIP_PATH` (an executor places it there) or "
-                "uploaded, and read member by member by `read_dataset_zip` with the archive-safety rules (bare file "
-                "names only, expanded-size and compression-ratio ceilings; never `extractall`). Without a `val.csv`, "
-                "`stratified_holdout` draws a seeded holdout of `VALIDATION_SPLIT` — correct only for independent rows; "
-                "temporal, grouped or patient-level data need your own leakage-safe splits. Look for the split sizes "
-                "and the class counts."
+                "## 4. Prepare the dataset: the synthetic sample or your own · [Concept]\n\n"
+                "From here on, every code cell runs one stage of the carried runner with `run_stage`. The expected input is one "
+                "`train.csv` with a declared categorical target column, plus optional `val.csv` and `test.csv` with identical "
+                "columns (explicit splits are preserved, never re-split). With `USE_BYOD = False` the carried package draws the "
+                "deterministic synthetic sample (`build_synthetic_dataset`: scikit-learn `make_classification`, seed 42). With "
+                "`USE_BYOD = True` the stage reads `BYOD_PATH` — a ZIP (member by member with the archive-safety rules: bare file "
+                "names, expanded-size and compression-ratio ceilings, never `extractall`), a single `train.csv`, or a directory — "
+                "or, in Colab with an empty path, the file you choose in the upload dialog. Without a `val.csv`, "
+                "`stratified_holdout` draws a seeded holdout of `VALIDATION_SPLIT` — correct only for independent rows.\n\n"
+                "**Identifiers are not features.** The synthetic table carries `record_id` (a unique row key) and `category` "
+                "(derived from the row index, so it carries no real signal). `DROP_COLUMNS` (default `['record_id', 'category']`) "
+                "keeps them out of the model and beside the predictions in Section 9. A model given a unique key can memorise it; "
+                "on new rows the key is meaningless.\n\n"
+                "The stage validates the table **before** any split, so a renamed target, duplicate columns or a reserved column "
+                "stop here with a coded finding (`TARGET_MISSING`, …) naming the file and the observed value — not a raw "
+                "`KeyError` from the splitter. A column that is numeric except for a few stray strings is refused naming the "
+                "column and the values (list it in `TEXT_COLUMNS` if it really is categorical). The stage first removes this "
+                "notebook's earlier exports from `outputs/`."
             ),
             "code": (
                 "USE_BYOD = False  # @param {{type:\"boolean\"}}\n"
-                "BYOD_ZIP_PATH = ''  # @param {{type:\"string\"}}\n"
+                "BYOD_PATH = ''  # @param {{type:\"string\"}}\n"
                 "TARGET_COLUMN = 'target'  # @param {{type:\"string\"}}\n"
-                "VALIDATION_SPLIT = 0.2  # @param {{type:\"number\"}}\n"
-                "SAMPLE_SEED = 42  # @param {{type:\"integer\"}}\n\n"
-                "WORK = Path('work')\n"
-                "shutil.rmtree(WORK, ignore_errors=True)\n"
-                "DATASET_DIR = WORK / 'dataset'\n"
-                "DATASET_DIR.mkdir(parents=True)\n"
-                "if USE_BYOD:\n"
-                "    if BYOD_ZIP_PATH:\n"
-                "        zip_name, zip_payload = Path(BYOD_ZIP_PATH).name, Path(BYOD_ZIP_PATH).read_bytes()\n"
-                "    else:\n"
+                "DROP_COLUMNS = ['record_id', 'category']  # @param {{type:\"raw\"}}\n"
+                "TEXT_COLUMNS = []  # @param {{type:\"raw\"}}\n"
+                "VALIDATION_SPLIT = 0.2  # @param {{type:\"number\"}}\n\n"
+                "def upload_one(what, field):\n"
+                "    try:\n"
                 "        from google.colab import files\n"
-                "        uploaded = files.upload()\n"
-                "        if len(uploaded) != 1:\n"
-                "            raise RuntimeError('Upload exactly one dataset ZIP.')\n"
-                "        zip_name, zip_payload = next(iter(uploaded.items()))\n"
-                "    zip_path = DATASET_DIR / Path(zip_name).name\n"
-                "    zip_path.write_bytes(zip_payload)\n"
-                "    dataset_origin = {{'type': 'user-supplied ZIP (BYOD)', 'zip': zip_path.name}}\n"
-                "    sample_kind = 'BYOD'\n"
-                "else:\n"
-                "    zip_path = build_synthetic_dataset(DATASET_DIR / 'synthetic.zip', rows=600, features=12, classes=3, seed=SAMPLE_SEED)\n"
-                "    dataset_origin = {{'type': 'deterministic synthetic tutorial sample', 'generator': 'tabpfn_classifier_pipeline.build_synthetic_dataset', 'rows': 600, 'features': 12, 'classes': 3, 'seed': SAMPLE_SEED}}\n"
-                "    sample_kind = 'synthetic'\n"
-                "dataset_sha256 = sha256_file(zip_path)\n"
-                "frames = read_dataset_zip(zip_path)\n"
-                "train_df = frames['train.csv']\n"
-                "val_df, test_df = frames.get('val.csv'), frames.get('test.csv')\n"
-                "split_origin = 'explicit train/val/test from the ZIP'\n"
-                "if val_df is None:\n"
-                "    train_df, val_df = stratified_holdout(train_df, TARGET_COLUMN, VALIDATION_SPLIT, seed=SAMPLE_SEED)\n"
-                "    split_origin = f'seeded stratified holdout of {{VALIDATION_SPLIT}} drawn from train.csv (independent rows assumed)'\n"
-                "print({{'sample_kind': sample_kind, **dataset_origin, 'zip_sha256': dataset_sha256[:16], 'splits': split_origin}})\n"
-                "print({{'train': train_df.shape, 'val': val_df.shape, 'test': None if test_df is None else test_df.shape}})\n"
-                "print('class counts (train):', train_df[TARGET_COLUMN].astype(str).value_counts().sort_index().to_dict())"
+                "    except ImportError:\n"
+                "        raise RuntimeError(f'{{field}} is empty, and the upload dialog exists only in Google Colab: set {{field}} to {{what}} in this runtime.') from None\n"
+                "    uploaded = files.upload()\n"
+                "    if not uploaded:\n"
+                "        raise RuntimeError(f'The upload was cancelled or empty: no file was received. Run this cell again and choose {{what}}, or set {{field}}.')\n"
+                "    if len(uploaded) != 1:\n"
+                "        raise ValueError(f'Upload exactly one file ({{what}}); got {{sorted(uploaded)}}.')\n"
+                "    upload_name, payload = next(iter(uploaded.items()))\n"
+                "    path = ROOT / 'inputs' / Path(upload_name).name\n"
+                "    path.parent.mkdir(parents=True, exist_ok=True)\n"
+                "    path.write_bytes(payload)\n"
+                "    return str(path)\n\n"
+                "byod_path = ''\n"
+                "if USE_BYOD:\n"
+                "    byod_path = BYOD_PATH or upload_one('one dataset ZIP or train.csv', 'BYOD_PATH')\n"
+                "run_stage('data', use_byod=USE_BYOD, byod_path=byod_path, target_column=TARGET_COLUMN, drop_columns=DROP_COLUMNS, text_columns=TEXT_COLUMNS, validation_split=VALIDATION_SPLIT)"
             ),
         },
         {
             "md": (
-                "## 5. Validate the inputs → input manifest\n\n"
-                "`validate_inputs` is the module's public validation stage: it applies the input contract (unique columns, "
-                "declared target present and complete, class floor and ceilings of the v3 generation — `MAX_TRAIN_ROWS`, "
-                "`MAX_FEATURES`, `MAX_CLASSES` — identical schema across splits, no reserved `prediction`/`proba_*` "
-                "columns, finite numeric features) and returns an **input manifest** naming the schema, the feature "
-                "columns, the classes, the per-split row and class counts, a digest of the training table and the "
-                "verdict; warnings (classes present in `val.csv` but absent from `train.csv`, a ≥10:1 class imbalance) "
-                "are carried as non-fatal findings. It is written to `outputs/{stem}_input_manifest.json`. To show what "
-                "rejection looks like, the cell also validates a probe table whose target column was renamed and records "
-                "the structured finding. The ceilings and the decision rule are printed before any model runs."
-            ),
-            "code": (
-                "os.makedirs('outputs', exist_ok=True)\n"
-                "print({{'ceilings': {{'MAX_TRAIN_ROWS': MAX_TRAIN_ROWS, 'MAX_FEATURES': MAX_FEATURES, 'MAX_CLASSES': MAX_CLASSES, 'MIN_CLASSES': MIN_CLASSES, 'MIN_ROWS_PER_CLASS': MIN_ROWS_PER_CLASS}}, 'decision_rule': DECISION_RULE, 'model_version': MODEL_VERSION}})\n"
-                "input_manifest = validate_inputs(train_df, TARGET_COLUMN, val=val_df, test=test_df, names=[dataset_origin['type']])\n"
-                "try:\n"
-                "    validate_inputs(train_df.rename(columns={{TARGET_COLUMN: 'label'}}), TARGET_COLUMN)\n"
-                "except InputRejected as exc:\n"
-                "    input_manifest['findings'].append({{'input': 'renamed-target-probe', **exc.finding}})\n"
-                "with open('outputs/{stem}_input_manifest.json', 'w', encoding='utf-8') as handle:\n"
-                "    json.dump(input_manifest, handle, indent=2, ensure_ascii=False, default=str)\n"
-                "FEATURE_COLUMNS = input_manifest['inputs'][0]['feature_columns']\n"
-                "CLASSES = input_manifest['inputs'][0]['classes']\n"
-                "print(json.dumps({{k: input_manifest['inputs'][0][k] for k in ('id', 'mode', 'target_column', 'classes', 'numeric_features', 'categorical_features', 'splits')}}, indent=2))\n"
-                "print('findings:', json.dumps(input_manifest['findings'], indent=2, default=str))"
+                "**What to notice:** `sample_kind: 'synthetic'`, 420 / 90 / 90 rows, balanced class counts (139 / 142 / 139 in "
+                "train), the dataset digest, and `drop_columns: ['record_id', 'category']`."
             ),
         },
         {
             "md": (
-                "## 6. Fit in context and evaluate\n\n"
-                "`pipe.fit` builds `tabpfn.TabPFNClassifier` on the digest-verified checkpoint of Section 3 "
-                "(`model_path` = the staged file, `N_ESTIMATORS` ensemble members, seed `SEED`) and registers the training "
-                "rows as the in-context support — **no gradient update happens**; a run takes seconds on CPU for the "
-                "sample. `pipe.evaluate` scores the frozen validation split (and `test.csv` when present): `accuracy` is "
-                "discrete correctness under the `argmax` rule; `balancedAccuracy` re-weights it per class so a "
-                "majority-class predictor cannot look good on an imbalanced table; `logLoss` scores the probabilities and "
-                "penalises confident mistakes; `rocAuc` (binary, or one-vs-rest macro) scores ranking quality independent "
-                "of any threshold. These are single-split numbers with no dispersion estimate. Look for the metrics and "
-                "the reported device."
+                "## 5. Validate the inputs → input manifest · [Evaluation practice]\n\n"
+                "`validate_inputs` is the package's public validation stage: unique column names, the target present with no "
+                "missing values, at least `MIN_CLASSES` classes with `MIN_ROWS_PER_CLASS` rows each, at most `MAX_FEATURES` "
+                "features and `MAX_TRAIN_ROWS` rows, finite numeric features, identical schemas across splits. It returns an "
+                "**input manifest** (schema, observed classes and counts, numeric/categorical feature counts, split sizes, the "
+                "train-table digest, findings), written to `outputs/{stem}_input_manifest.json`. A class that appears in "
+                "`val.csv` or `test.csv` but not in `train.csv` can never be predicted and would break log loss later, so it is "
+                "**refused** here as `UNSEEN_CLASSES`, naming the split and the classes. To show what rejection looks like, the "
+                "stage validates a probe with the target renamed and records the package's own `TARGET_MISSING` finding. The "
+                "majority-class baseline is computed on the validation rows."
+            ),
+            "code": "run_stage('validate')",
+        },
+        {
+            "md": (
+                "**What to notice:** 12 numeric features and no `record_id` among them; three classes; the `renamed-target-probe` "
+                "finding with code `TARGET_MISSING`; and the majority-class baseline — accuracy 0.3333 on a balanced table.\n\n"
+                "**Checkpoint:** why is `record_id` kept out of the features even though the model might score well with it?\n\n"
+                "<details>\n<summary>Check your reasoning (open after answering)</summary>\n\n"
+                "A unique key identifies each training row exactly, so a flexible model can associate it with that row's label — "
+                "a pattern that cannot exist for a new row, whose key it has never seen. At best the key is noise; at worst it "
+                "leaks information (keys assigned in label order, by date, or by site) and inflates validation scores that will "
+                "not survive deployment. Keeping it beside the predictions lets you join results back without ever showing it to "
+                "the model.\n\n"
+                "</details>"
+            ),
+        },
+        {
+            "md": (
+                "## 6. Fit in context and evaluate · [Concept]\n\n"
+                "`fit` registers the 420 support rows as context — no gradient update, the pinned checkpoint is unchanged — and "
+                "the stage checks that the estimator's class order equals the validated class list. `evaluate` then scores the "
+                "validation and test rows with **accuracy**, **balanced accuracy**, **log loss** and **ROC-AUC** (one-vs-rest), "
+                "computed by the package's `classification_metrics` in the fitted class order. Ensemble averaging is set by "
+                "`N_ESTIMATORS` (default 4) and the preprocessing randomness by `SEED`.\n\n"
+                "**Predict before running:** the majority baseline is 0.33 and a logistic regression reaches 0.91 on the validation "
+                "rows (Section 7). Where will TabPFN land — and how many of the 90 rows will it get wrong?"
             ),
             "code": (
                 "N_ESTIMATORS = 4  # @param {{type:\"integer\"}}\n"
-                "SEED = 42  # @param {{type:\"integer\"}}\n\n"
-                "pipe.n_estimators, pipe.random_state = N_ESTIMATORS, SEED\n"
-                "pipe.fit(train_df[FEATURE_COLUMNS], train_df[TARGET_COLUMN], target_column=TARGET_COLUMN)\n"
-                "if pipe.classes != CLASSES:\n"
-                "    raise RuntimeError('estimator class order differs from the validated class list')\n"
-                "validation_metrics = pipe.evaluate(val_df[FEATURE_COLUMNS], val_df[TARGET_COLUMN])\n"
-                "test_metrics = None if test_df is None else pipe.evaluate(test_df[FEATURE_COLUMNS], test_df[TARGET_COLUMN])\n"
-                "print(json.dumps({{'mode': 'zero-shot-icl (in-context conditioning, no gradient update)', 'device': pipe.device, 'source': pipe.source, 'n_estimators': N_ESTIMATORS, 'seed': SEED, 'classes': pipe.classes, 'validation': validation_metrics, 'test': test_metrics}}, indent=2))"
+                "SEED = 42  # @param {{type:\"integer\"}}\n"
+                "run_stage('condition', n_estimators=N_ESTIMATORS, seed=SEED)"
             ),
         },
         {
             "md": (
-                "## 7. Majority-class baseline → evaluation report\n\n"
-                "`majority_class_baseline` always predicts the most frequent training class and is scored on the same "
-                "validation rows (its log loss uses the training class frequencies as probabilities), so the comparison "
-                "uses identical rows. `evaluation_report` is the module's public evaluation stage: it carries the four "
-                "metrics with the verdict `sample-sanity`, the baseline, the split and the fresh-boundary reload check "
-                "(filled in by Section 8 and re-written there); without a scored validation split the verdict is "
-                "`not-measurable`. It is written to `outputs/{stem}_evaluation_report.json`. On the synthetic sample "
-                "these are sanity metrics for the plumbing, not evidence of tabular-classification skill."
-            ),
-            "code": (
-                "baseline = majority_class_baseline(train_df[TARGET_COLUMN], val_df[TARGET_COLUMN], classes=CLASSES)\n"
-                "report = evaluation_report(validation_metrics, baseline=baseline, n_validation=len(val_df), class_labels=CLASSES, sample_kind=sample_kind)\n"
-                "with open('outputs/{stem}_evaluation_report.json', 'w', encoding='utf-8') as handle:\n"
-                "    json.dump(report, handle, indent=2, ensure_ascii=False)\n"
-                "print(json.dumps({{key: report[key] for key in ('verdict', 'reason', 'adaptation', 'decision_rule', 'n_validation', 'metrics', 'baselines')}}, indent=2))\n"
-                "if validation_metrics['accuracy'] < baseline['accuracy']:\n"
-                "    print('WARNING: in-context TabPFN does not beat the majority baseline on this holdout; inspect the data before drawing any conclusion.')"
+                "**What to notice:** `mode: zero-shot-icl`, the device, the classes, and the validation and test metrics; the "
+                "printed adaptation note. No recorded run of this revision exists yet, so read your own numbers against Section 7.\n\n"
+                "**Checkpoint:** `fit` took seconds and changed no weight. What, then, did the model learn from your rows?\n\n"
+                "<details>\n<summary>Check your reasoning (open after answering)</summary>\n\n"
+                "Nothing was learned in the gradient sense. TabPFN was trained once, on synthetic tasks, to behave like a learning "
+                "algorithm: given labelled rows and a query in the same forward pass, it outputs the class distribution a good "
+                "learner would. `fit` stores and preprocesses your rows so each prediction can attend to them. That is why the "
+                "bundle must carry the fitted state (which holds the support rows) and why quality depends entirely on them.\n\n"
+                "</details>"
             ),
         },
         {
             "md": (
-                "## 8. Export the artifact bundle and verify it across a fresh boundary\n\n"
-                "The deployable artifact is the pair `model.tabpfn_fit` (fitted estimator state **including the "
-                "in-context training rows**) + `model.ckpt` (a byte copy of the verified foundation checkpoint) described "
-                "by `artifact_manifest.json` (task, target, ordered feature columns, classes, per-file SHA-256, base-model "
-                "identity); the fitted archive alone is not a model. `pipe.save_artifact` writes it and `zip_artifact_bundle` zips it "
-                "to `outputs/{stem}_artifact.zip` for the companion artifact-inference notebook. Then it does what a "
-                "downstream consumer would do with the bundle and nothing else: copy it to a **fresh location**, "
-                "`validate_artifact_bundle` (schema, member names, sizes, digests, archive safety — before any model "
-                "state is deserialised), reconstruct through `TabPFNClassifierPipeline.from_artifact` (the fitted archive's "
-                "recorded `model_path` is rewritten in a temporary copy to the companion checkpoint; TabPFN's "
-                "`load_fitted_tabpfn_model` restores the estimator; no refit, no download) and require the recomputed "
-                "validation accuracy to equal the recorded value within `1e-6`. Because the bundle contains training "
-                "rows, treat it with the same confidentiality controls as the dataset; loading it executes trusted "
-                "serialised Python/torch state."
+                "## 7. Baselines → evaluation report · [Evaluation practice]\n\n"
+                "Two references on the same rows: the **majority-class baseline** (always the most frequent training class; log "
+                "loss from the training frequencies) and a **standardised logistic regression** on the numeric features — a simple "
+                "classical model that is already strong on a synthetic linear-ish table. Each is reported with its validation "
+                "error count beside the one-row resolution (1/90 = 0.0111). `evaluation_report` is the package's public evaluation "
+                "stage: verdict `sample-sanity` (one holdout of one synthetic table, no dispersion estimate), the metric entries, "
+                "the baselines, the caveats and the proposed RUN7 deviation, written to `outputs/{stem}_evaluation_report.json`.\n\n"
+                "**Predict before running:** if TabPFN and the logistic regression differ by two validation rows, is that a "
+                "difference you would report?"
             ),
-            "code": (
-                "ARTIFACT_DIR = WORK / 'artifact'\n"
-                "artifact_manifest = pipe.save_artifact(ARTIFACT_DIR)\n"
-                "bundle_zip_sha256 = zip_artifact_bundle(ARTIFACT_DIR, 'outputs/{stem}_artifact.zip')\n"
-                "print({{'artifact': sorted(p.name for p in ARTIFACT_DIR.iterdir()), 'fittedEstimatorSha256': artifact_manifest['fittedEstimatorSha256'][:16], 'foundationCheckpointSha256': artifact_manifest['foundationCheckpointSha256'][:16], 'bundle_zip_sha256': bundle_zip_sha256[:16]}})\n"
-                "if artifact_manifest['foundationCheckpointSha256'] != WEIGHTS_SHA256:\n"
-                "    raise RuntimeError('the bundled checkpoint is not the pinned foundation checkpoint')\n"
-                "FRESH_DIR = WORK / 'fresh-reload'\n"
-                "shutil.copytree(ARTIFACT_DIR, FRESH_DIR)\n"
-                "checked = validate_artifact_bundle(FRESH_DIR, expected_checkpoint_sha256=WEIGHTS_SHA256)\n"
-                "fresh = TabPFNClassifierPipeline.from_artifact(FRESH_DIR, device=pipe.device, expected_checkpoint_sha256=WEIGHTS_SHA256)\n"
-                "if fresh.classes != CLASSES or fresh.feature_columns != FEATURE_COLUMNS:\n"
-                "    raise RuntimeError('reloaded artifact disagrees with the validated schema')\n"
-                "reloaded_metrics = fresh.evaluate(val_df[FEATURE_COLUMNS], val_df[TARGET_COLUMN])\n"
-                "reload_check = {{'recordedAccuracy': validation_metrics['accuracy'], 'reloadedAccuracy': reloaded_metrics['accuracy'], 'tolerance': 1e-6, 'recordedModelPath': checked['recordedModelPath']}}\n"
-                "reload_check['accuracyMatches'] = abs(reload_check['reloadedAccuracy'] - reload_check['recordedAccuracy']) <= reload_check['tolerance']\n"
-                "print(json.dumps(reload_check, indent=2))\n"
-                "if not reload_check['accuracyMatches']:\n"
-                "    raise RuntimeError('The reloaded artifact does not reproduce the recorded validation metric. Do not ship this artifact.')\n"
-                "report = evaluation_report(validation_metrics, baseline=baseline, n_validation=len(val_df), class_labels=CLASSES, sample_kind=sample_kind, reload_check=reload_check)\n"
-                "with open('outputs/{stem}_evaluation_report.json', 'w', encoding='utf-8') as handle:\n"
-                "    json.dump(report, handle, indent=2, ensure_ascii=False)\n"
-                "print(f'Fresh-boundary verification PASSED on {{len(val_df)}} validation rows.')"
+            "code": "run_stage('report')",
+        },
+        {
+            "md": (
+                "**What to notice:** `validation_errors` — the majority baseline gets 60 of 90 wrong, the logistic regression 8 "
+                "(validation accuracy 0.9111; test 0.9444, 5 errors), TabPFN from your run; and the interpretation line.\n\n"
+                "**Checkpoint:** suppose TabPFN gets 5 validation rows wrong and the logistic regression 8. What can you claim?\n\n"
+                "<details>\n<summary>Check your reasoning (open after answering)</summary>\n\n"
+                "Three rows out of 90 is 0.033 of accuracy on one split of one synthetic table. Without repeated splits there is no "
+                "dispersion estimate, and the test split is the place to check whether the gap holds. The honest claim is that "
+                "TabPFN is at least as good as a strong linear reference here, without tuning — not that it is better in general. "
+                "Read balanced accuracy and log loss too: a lower log loss means more confident correct probabilities.\n\n"
+                "</details>"
             ),
         },
         {
             "md": (
-                "## 9. Score new rows\n\n"
-                "Real use means rows the estimator has not seen. The default takes the first eight rows of `test.csv` "
-                "(or of `val.csv` when no test split exists) with the target column removed; set `USE_BYOD_ROWS = True` "
-                "to supply your own CSV instead (`NEW_DATA_PATH` for an executor, or the upload dialog) with exactly the "
-                "artifact's feature columns and no target/`prediction`/`proba_*` columns — `validate_new_rows` rejects "
-                "duplicates, missing or extra columns and infinite values rather than silently dropping anything. "
-                "`predict` on the **reloaded** estimator returns `prediction` (the `argmax` class) and one `proba_<class>` "
-                "column per class in the artifact's stored class order; the probabilities are raw ensemble outputs, "
-                "**not calibrated**, and 0.9 does not mean a 90 % chance of being right."
+                "## 8. Export the artifact bundle and verify it in a fresh process · [Engineering]\n\n"
+                "`save_artifact` writes `model.tabpfn_fit` (the fitted estimator state, without the foundation weights), "
+                "`model.ckpt` (a byte copy of the verified checkpoint) and `artifact_manifest.json` (target and feature columns, "
+                "classes, both SHA-256 digests, the base-model identity, the ensemble settings, and the feature kinds the "
+                "companion uses to refuse text in numeric columns); `zip_artifact_bundle` writes "
+                "`outputs/{stem}_artifact.zip`. The `export` stage prints the ZIP and fitted-archive digests — the **trusted "
+                "digests** to give the companion notebook.\n\n"
+                "The `reload` stage runs in a **fresh process**: it clears and fills `outputs/artifact-reload/`, checks the bundle "
+                "with `validate_artifact_bundle` (manifest schema, member names, sizes, digests, the checkpoint equal to the pinned "
+                "one), rebuilds the estimator with `from_artifact` (no refit, no download), and requires its probabilities on "
+                "**every** validation row to equal the exporting process's within `rtol=1e-5`, `atol=1e-6`, recording the largest "
+                "difference. Comparing probabilities is a much stronger check than comparing accuracy, which on 90 rows moves "
+                "only in steps of 0.011.\n\n"
+                "**Predict before running:** if the reload produced the same labels but probabilities differing by 0.01, would "
+                "this check pass?"
+            ),
+            "code": "run_stage('export')\nrun_stage('reload')",
+        },
+        {
+            "md": (
+                "**What to notice:** the three bundle members, the two digests and the ZIP digest; then `maxAbsProbabilityDifference` "
+                "(0 or a few 1e-8 on the same device), `labelsIdentical: True` and the `PASSED` line. Re-running this cell alone "
+                "works: the reload directory is cleared first.\n\n"
+                "<details>\n<summary>Check your reasoning (open after answering)</summary>\n\n"
+                "No. A 0.01 difference is far above `atol=1e-6`, so the check fails even though every label agrees — exactly the "
+                "silent drift an accuracy-only comparison would miss. A bundle that cannot reproduce its own probabilities should "
+                "not be shipped.\n\n"
+                "</details>"
+            ),
+        },
+        {
+            "md": (
+                "## 9. Score new rows with the rebuilt bundle · [Engineering]\n\n"
+                "By default the `predict` stage takes the first eight rows of `test.csv` (held out from the support), removes the "
+                "target, writes them to `outputs/{stem}_new_rows.csv` — the companion notebook's input — and scores them with the "
+                "estimator rebuilt from the bundle. Tick `USE_BYOD_ROWS` and set `NEW_DATA_PATH` (or, in Colab, leave it empty to "
+                "upload) to score your own unlabelled CSV. `validate_new_rows` requires exactly the fitted feature columns (any "
+                "order) and no target, `prediction` or `proba_<class>` column; `DROP_COLUMNS` present in the rows are kept beside "
+                "the predictions, so the output joins back on your own key. The output adds `prediction` (the `argmax` label) and "
+                "one `proba_<class>` column per class **in the fitted class order**; the probabilities are uncalibrated and no "
+                "threshold is shipped. `outputs/{stem}_result.json` records predictions, metrics, baselines, the reload check, the "
+                "input manifest, the dataset and bundle digests, the notebook's source, the model identity and licence, and the "
+                "runtime."
             ),
             "code": (
                 "USE_BYOD_ROWS = False  # @param {{type:\"boolean\"}}\n"
                 "NEW_DATA_PATH = ''  # @param {{type:\"string\"}}\n\n"
+                "new_data_file = ''\n"
                 "if USE_BYOD_ROWS:\n"
-                "    if NEW_DATA_PATH:\n"
-                "        new_name, new_payload = Path(NEW_DATA_PATH).name, Path(NEW_DATA_PATH).read_bytes()\n"
-                "    else:\n"
-                "        from google.colab import files\n"
-                "        uploaded = files.upload()\n"
-                "        if len(uploaded) != 1:\n"
-                "            raise RuntimeError('Upload exactly one CSV of new rows.')\n"
-                "        new_name, new_payload = next(iter(uploaded.items()))\n"
-                "    new_rows = pd.read_csv(io.BytesIO(new_payload))\n"
-                "    new_rows_origin = f'user-supplied CSV (BYOD): {{new_name}}'\n"
-                "else:\n"
-                "    source_df, source_label = (test_df, 'test.csv') if test_df is not None else (val_df, 'val.csv')\n"
-                "    new_rows = source_df.drop(columns=[TARGET_COLUMN]).head(8).reset_index(drop=True)\n"
-                "    new_rows_origin = f'first 8 rows of {{source_label}} (held out from the in-context support), target removed'\n"
-                "new_rows = validate_new_rows(new_rows, FEATURE_COLUMNS, target_column=TARGET_COLUMN, classes=CLASSES)\n"
-                "predictions = fresh.predict(new_rows)\n"
-                "print('scored rows drawn from:', new_rows_origin)\n"
-                "print(predictions.to_string(index=False))"
+                "    new_data_file = NEW_DATA_PATH or upload_one('one unlabelled CSV', 'NEW_DATA_PATH')\n"
+                "run_stage('predict', new_data_path=new_data_file)"
             ),
         },
         {
             "md": (
-                "## 10. Export machine-readable results and provenance\n\n"
-                "`outputs/{stem}_predictions.csv` holds one row per scored input (`row_id`, `prediction`, `proba_<class>` "
-                "in class order); `outputs/{stem}_result.json` records the validation and test metrics, the majority "
-                "baseline, the evaluation report, the fresh-boundary reload check, the input manifest, the dataset identity "
-                "(ZIP digest, split origin, row counts), the artifact manifest (with its digests), the inference settings, "
-                "the notebook's source (repository, revision, module digest, generator), the pinned model identity, "
-                "revision and licence, and the runtime. `outputs/{stem}_artifact.zip` is the bundle for the companion "
-                "notebook. No credentials are recorded."
+                "**What to notice:** eight rows with `record_id` and `category` first, then `prediction` and three `proba_class_*` "
+                "columns summing to 1 per row."
+            ),
+        },
+        {
+            "md": (
+                "## 10. Optional activity: how much does the ensemble size matter? · [Concept]\n\n"
+                "**Predict → Change → Run → Observe → Explain.** **Predict:** with `ACTIVITY_N_ESTIMATORS = 1` instead of 4, will "
+                "validation accuracy drop by more than one row (0.0111), and how far will the probabilities move? **Change:** tick "
+                "`RUN_ACTIVITY` (try 1, then 8). **Run** this cell. **Observe** the canonical and changed validation metrics, "
+                "`labels_changed` and `max_abs_probability_change`. **Explain** what the ensemble buys. The activity refits in "
+                "context, writes only to `outputs/activity/`, and stops if any canonical output changed."
             ),
             "code": (
-                "predictions.to_csv('outputs/{stem}_predictions.csv', index=False)\n"
-                "payload = {{\n"
-                "    'metrics': {{'validation': validation_metrics, 'test': test_metrics}},\n"
-                "    'majority_class_baseline': baseline,\n"
-                "    'evaluation_report': report,\n"
-                "    'fresh_boundary_reload': reload_check,\n"
-                "    'input_manifest': input_manifest,\n"
-                "    'dataset': {{**dataset_origin, 'sample_kind': sample_kind, 'zip_sha256': dataset_sha256, 'target_column': TARGET_COLUMN, 'feature_columns': FEATURE_COLUMNS, 'classes': CLASSES, 'splits': split_origin, 'rows': {{'train': len(train_df), 'val': len(val_df), 'test': None if test_df is None else len(test_df)}}}},\n"
-                "    'artifact': artifact_manifest,\n"
-                "    'inference': {{'mode': 'zero-shot-icl', 'adaptation': 'in-context conditioning only; the private-worker fine-tune path is not carried', 'n_estimators': N_ESTIMATORS, 'seed': SEED, 'decision_rule': DECISION_RULE, 'new_rows_origin': new_rows_origin, 'scored_rows': int(len(predictions))}},\n"
-                "    'notebook_source': NOTEBOOK_SOURCE,\n"
-                "    'repository_revision': NOTEBOOK_SOURCE['repository_revision'],\n"
-                "    'model_id': MODEL_ID,\n"
-                "    'model_revision': MODEL_REVISION,\n"
-                "    'model_license': MODEL_LICENSE,\n"
-                "    'model_file': WEIGHTS_FILE,\n"
-                "    'runtime': {{'python': platform.python_version(), 'torch': torch.__version__, 'tabpfn': importlib.metadata.version('tabpfn'), 'pandas': pd.__version__, 'scikit_learn': importlib.metadata.version('scikit-learn'), 'device': pipe.device}},\n"
-                "}}\n"
-                "with open('outputs/{stem}_result.json', 'w', encoding='utf-8') as handle:\n"
-                "    json.dump(payload, handle, indent=2, ensure_ascii=False, default=str)\n"
-                "print(sorted(os.listdir('outputs')))"
+                "RUN_ACTIVITY = False  # @param {{type:\"boolean\"}}\n"
+                "ACTIVITY_N_ESTIMATORS = 1  # @param {{type:\"integer\"}}\n"
+                "if RUN_ACTIVITY:\n"
+                "    run_stage('activity', n_estimators=ACTIVITY_N_ESTIMATORS)\n"
+                "else:\n"
+                "    print('Optional activity skipped: tick RUN_ACTIVITY to run it. The canonical outputs are complete.')"
+            ),
+        },
+        {
+            "md": (
+                "**What to notice (if you ran it):** the two settings, both metric sets, `labels_changed` and the largest "
+                "probability change; `canonical_outputs_unchanged: True`.\n\n"
+                "<details>\n<summary>Check your reasoning (open after running)</summary>\n\n"
+                "Each ensemble member sees the table through a different preprocessing and feature order; averaging them steadies "
+                "the probabilities. Going from 4 to 1 usually moves log loss more than accuracy: the labels of confident rows stay, "
+                "the borderline rows can flip. On 90 rows a change of one or two labels is within the one-row resolution, so the "
+                "honest reading is about the probabilities, not the accuracy.\n\n"
+                "</details>"
             ),
         },
     ],
     "closing": (
+        "## Troubleshooting · [Engineering]\n\n"
+        "| Symptom | Likely cause | What to do |\n"
+        "|---|---|---|\n"
+        "| Section 1 stops with `This notebook needs a Linux x86_64 runtime` | a local Windows or macOS kernel, or an ARM machine | Use Google Colab, Kaggle, or a Linux x86_64 Jupyter kernel. |\n"
+        "| `Not enough free disk` | the isolated environment needs about 8 GB | Start a fresh runtime; an environment built from the same lock is reused. |\n"
+        "| `Carried file integrity failure` | a carried file was edited in the notebook | Open a fresh copy from the repository. |\n"
+        "| `uv … mismatch`, `URLError`, or `CalledProcessError` from `uv` | network or a transient PyPI error | Re-run the Section 2 install cell. Never remove a pin or a hash. |\n"
+        "| `The run directory … has no carried files, or the isolated environment is gone` | Section 1 run with `NEW_RUN_DIRECTORY` ticked | Run Sections 1–3 again, or *Run all*. |\n"
+        "| `RuntimeError: Stage '…' failed (exit 1): …` | the stage's own error follows the colon | Find it below; fix the cause and re-run from that cell. |\n"
+        "| A Hub download error in Section 3, or `… sha256 … != manifest` | a transient failure or a corrupted download | Re-run Section 3; delete the partial file under `weights/` if the digest fails. Never edit the manifest. |\n"
+        "| `[TARGET_MISSING] … target column … not present` | your label column has another name | Set `TARGET_COLUMN`. |\n"
+        "| `[UNSEEN_CLASSES] classes absent from train.csv` | a class only in `val.csv` / `test.csv` | Re-split so every class is in `train.csv`, or remove those rows. |\n"
+        "| `[DUPLICATE_COLUMNS]`, `[RESERVED_COLUMNS]`, `[SCHEMA_MISMATCH]`, `[RARE_CLASSES]`, `[TOO_FEW_CLASSES]` | the table breaks the input contract | Fix the named columns or classes. |\n"
+        "| `column … is numeric except for N value(s)` | stray text in a numeric column | Fix the values, or list the column in `TEXT_COLUMNS`. |\n"
+        "| `DROP_COLUMNS … are not in the header` | a typo in `DROP_COLUMNS` | Use the exact column names. |\n"
+        "| `BYOD_PATH … does not exist`, `BYOD_PATH is empty, and the upload dialog exists only in Google Colab`, `The upload was cancelled or empty` | no file supplied | Set the path, or run the cell again and choose a file. |\n"
+        "| `The reloaded artifact does not reproduce the exporting process's probabilities` | a corrupted bundle or a changed runtime | Re-run Sections 6–8; do not ship the bundle. |\n"
+        "| `new rows: [SCHEMA_MISMATCH]` | your rows lack a feature or carry an unknown column | Supply exactly the fitted features; identifiers listed in `DROP_COLUMNS` are allowed. |\n\n"
         "## Interpretation and limits\n\n"
-        "The predicted class is `argmax` over TabPFN's class probabilities, which are raw ensemble outputs, not "
-        "calibrated, with no shipped threshold. The evaluation report's `sample-sanity` verdict names what it is: one "
-        "holdout of one table with no dispersion estimate — on the synthetic sample a plumbing check, and even BYOD "
-        "metrics must not be generalised to a domain, a population or a class distribution. Random stratified splitting "
-        "assumes independent rows; temporal, grouped or patient-level data need leakage-safe splits you supply. "
-        "In-context learning is not fine-tuning: the estimator's quality depends entirely on the training rows it "
-        "conditions on, and the artifact carries those rows. Digest equality proves the checkpoint bytes are the ones "
+        "The predicted class is `argmax` over TabPFN's class probabilities, which are raw ensemble outputs, not calibrated, "
+        "with no shipped threshold. The evaluation report's `sample-sanity` verdict names what it is: one holdout of one "
+        "synthetic table with no dispersion estimate — a plumbing check that must not be generalised. On this table a "
+        "logistic regression already reaches 0.911 (validation) and 0.944 (test), and one row is 0.011 of accuracy, so "
+        "differences of a few rows rank nothing. Random stratified splitting assumes independent rows; temporal, grouped or "
+        "patient-level data need leakage-safe splits you supply. In-context learning is not fine-tuning: quality depends "
+        "entirely on the support rows, and the bundle carries them. Digest equality proves the checkpoint bytes are the ones "
         "pinned at the immutable revision; it does not by itself prove who published them.\n\n"
-        "Successful execution proves that the recorded repository revision's pipeline module, carried in this "
-        "notebook, can acquire and digest-verify the pinned TabPFN-3 checkpoint, validate the demonstrated table into "
-        "an input manifest, fit in context and beat a trivial baseline on the synthetic sample, export the artifact "
-        "bundle, reload it across a fresh boundary and reproduce the recorded metric, score new rows, and emit the "
-        "shown machine-readable outputs in the tested runtime — without the repository being reachable. It does "
-        "**not** establish benchmark superiority, generalisation, fairness, robustness, calibration, safety for "
-        "high-consequence decisions, production fitness, or anything about the fine-tuned models the private DIMER "
-        "worker produces.\n\n"
-        "**Next experiments:** raise `N_ESTIMATORS` to 8 and compare log loss; enable `USE_BYOD` with a small table of "
-        "your own (a few hundred rows, two to ten classes) and read `balancedAccuracy` against the majority baseline; "
-        "drop `val.csv` from the ZIP and watch the seeded holdout take over; hand `outputs/{stem}_artifact.zip` to the "
-        "companion artifact-inference notebook in a fresh session.\n\n"
+        "Successful execution proves that the recorded repository revision's package, carried in this notebook, can acquire "
+        "and digest-verify the pinned TabPFN-3 checkpoint, validate the demonstrated table into an input manifest with coded "
+        "refusals, fit in context, compute sample metrics against a trivial and a classical baseline, export the artifact "
+        "bundle, rebuild equivalent probabilities from it in a fresh process, score new rows with identifiers kept, and emit "
+        "the shown machine-readable outputs — without the repository being reachable. It does **not** establish benchmark "
+        "superiority, generalisation, fairness, robustness, calibration, safety for high-consequence decisions, production "
+        "fitness, or anything about fine-tuned TabPFN models.\n\n"
+        "## Conclusion · [Evaluation practice]\n\n"
+        "Write three to five sentences, using the numbers your run printed:\n\n"
+        "1. **Result:** TabPFN's validation and test accuracy, log loss and error count beside the majority baseline and the "
+        "logistic regression.\n"
+        "2. **Reading:** whether the gap exceeds a few rows, and what the one-row resolution allows you to claim.\n"
+        "3. **Reuse:** what the Section 8 reload proved, and why probabilities were compared rather than accuracy.\n"
+        "4. **Limits:** the one limitation you would fix first (for example repeated splits, real data, calibration).\n\n"
+        "<details>\n<summary>Sample conclusion (open after writing yours)</summary>\n\n"
+        "On the 90-row validation and 90-row test splits of the synthetic three-class table, TabPFN-3 conditioned in context "
+        "on 420 rows scored the accuracy and log loss printed in Sections 6 and 7, against 0.33 for the majority class and "
+        "0.911 / 0.944 for a standardised logistic regression. Any gap between TabPFN and the logistic regression is a few "
+        "rows at most on one split, so the run shows that TabPFN matches a strong simple reference without tuning, not that "
+        "it is better. The exported bundle rebuilt identical probabilities in a fresh process, a stronger guarantee than "
+        "matching accuracy. Before any use I would evaluate on repeated splits of a real, domain-representative table and "
+        "calibrate the probabilities — and clear the non-commercial licence.\n\n"
+        "</details>\n\n"
+        "**Next experiments:** run the activity with 1 and 8 estimators and compare log loss; enable `USE_BYOD` with a small "
+        "table of your own and read balanced accuracy against both references; drop `val.csv` from your ZIP and watch the "
+        "seeded holdout take over; hand `outputs/{stem}_artifact.zip`, its printed digests and `outputs/{stem}_new_rows.csv` "
+        "to the companion artifact-inference notebook in a fresh session.\n\n"
         "## References\n\n"
         f"- Repository README: https://github.com/kurtvalcorza/{REPO}/blob/main/README.md\n"
         f"- Repository model card: https://github.com/kurtvalcorza/{REPO}/blob/main/MODEL_CARD.md\n"

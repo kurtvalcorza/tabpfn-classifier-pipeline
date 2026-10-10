@@ -1,0 +1,81 @@
+[colab] Parsing notebook '/home/kurt/colab-runs/tabpfn-classifier-pipeline-0e5a27c-9482e6/tabpfn_classifier_artifact_inference_colab_0e5a27c_colab-cli-t4.ipynb'...
+[colab] Executing cell 1/9 - Infrastructure: check the runtime, accelerator and disk; create (or keep) the run directory...
+{'accelerator': 'Tesla T4, 15360 MiB', 'kernel_python': '3.13.15', 'run_directory': '/content/dimer_runs/tabpfn_classifier_artifact_inference/bf03f24c8058', 'outputs': '/content/outputs', 'weights': '/content/weights', 'environment_root': '/tmp/dimer_uv', 'free_gib': {'weights': 193.3, 'environment': 193.3}}
+[colab] Executing cell 2/9 - Infrastructure: write and verify the carried package, stage runner, lock, manifest and samples...
+{'carried_files': 7, 'verified': True, 'repository': 'kurtvalcorza/tabpfn-classifier-pipeline', 'revision': 'uncommitted', 'generator': 'build_notebook.py/3.0-tabular'}
+[colab] Executing cell 3/9 - Infrastructure: build (or reuse) the isolated locked environment and define the stage runner...
+{'notebook_source': 'uncommitted', 'python': '3.12.12', 'torch': '2.11.0', 'tabpfn': '8.1.0', 'numpy': '2.5.3', 'pandas': '2.3.2', 'scikit-learn': '1.9.0', 'cuda': True, 'locked_packages': 63, 'environment': '/tmp/dimer_uv/venv-22613682882ebc1b', 'environment_reused': False, 'setup_seconds': 63}
+[colab] Executing cell 4/9 - Infrastructure: stage and digest-verify the pinned checkpoint...
+Running stage 'weights' in the isolated environment; log: /content/dimer_runs/tabpfn_classifier_artifact_inference/bf03f24c8058/logs/weights.log
+{'model_id': 'Prior-Labs/tabpfn_3', 'revision': '24a16a89d245878b846555110985634aa2e656d7', 'license': 'tabpfn-3-license-v1.0', 'files': 4, 'total_bytes': 212830007}
+{'weights_dir': '/content/weights/tabpfn-3-classifier', 'fetched': ['LICENSE', 'README.md', 'config.json', 'tabpfn-v3-classifier-v3_default.ckpt']}
+{'verified_files': 4, 'revision': '24a16a89d245878b846555110985634aa2e656d7', 'checkpoint': 'tabpfn-v3-classifier-v3_default.ckpt', 'sha256': 'd0d865d54dfbc524f5703104be90620182dca7e5fb2c16de72e9959ea18f3988'}
+[colab] Executing cell 5/9 - tabpfn_classifier_artifact_inference-14...
+Running stage 'artifact' in the isolated environment; log: /content/dimer_runs/tabpfn_classifier_artifact_inference/bf03f24c8058/logs/artifact.log
+{'sample_artifact': 'https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/sample-bundle-v1/tabpfn_classifier_sample_bundle.zip', 'bytes': 169881, 'sha256': 'd61f1c2642154c2ab0d7a81954ec6522a908e690177f9723563ab44054fde0ba', 'verified_before_extraction': True, 'reused_download': False, 'producer': {'notebook': 'tutorials/tabpfn_classifier_colab.ipynb', 'notebook_blob': 'a4c8b2904e710d3b2cb260971de37cd9737f5355', 'commit': '08dbf959aac546bc073c8d88e15a75cac8a70216', 'runtime': "Linux x86_64 (WSL2), CPU only (CUDA_VISIBLE_DEVICES=-1), the notebook's own isolated hash-locked uv environment (tutorials/requirements-colab.lock.txt), code cells driven in order by a plain-CPython stand-in kernel, default form values (synthetic sample, N_ESTIMATORS=4)", 'run': '2026-10-10 local lock-only CPU run, 11/11 code cells, 210.6 s; fresh-boundary verification PASSED; not clean-runtime evidence', 'run_record': 'notebook-review relay ledger fixes/cloud-tabpfn-classifier-pipeline/drive-e2e-2026-10-10.log'}}
+{'source': 'sample', 'zip': 'tabpfn_classifier_sample_bundle.zip', 'trusted_digest': 'verified (pinned release-asset SHA-256 before extraction; sample files against SAMPLE_BUNDLE.json; model.ckpt is the checkpoint verified in Section 3)'}
+{'pinned_digests': {'zip': 'd61f1c2642154c2a', 'fittedEstimator': '59a8a9357efb56c6', 'foundationCheckpoint (= pinned base)': 'd0d865d54dfbc524'}}
+{'featureColumns': 12, 'targetColumn': 'target', 'classes': ['class_0', 'class_1', 'class_2'], 'mode': 'zero-shot-icl', 'nEstimators': 4, 'baseModel': 'Prior-Labs/tabpfn_3'}
+[colab] Executing cell 6/9 - tabpfn_classifier_artifact_inference-17...
+Running stage 'reconstruct' in the isolated environment; log: /content/dimer_runs/tabpfn_classifier_artifact_inference/bf03f24c8058/logs/reconstruct.log
+{'source': 'artifact', 'device': 'cuda', 'classes': ['class_0', 'class_1', 'class_2'], 'n_estimators': 4, 'random_state': 42, 'refit': False, 'network_fallback_for_weights': False}
+[colab] Executing cell 7/9 - tabpfn_classifier_artifact_inference-20...
+Running stage 'rows' in the isolated environment; log: /content/dimer_runs/tabpfn_classifier_artifact_inference/bf03f24c8058/logs/rows.log
+{
+  "id": "new_rows.csv",
+  "mode": "artifact-inference",
+  "rows": 8,
+  "feature_columns": [
+    "feature_00",
+    "feature_01",
+    "feature_02",
+    "feature_03",
+    "feature_04",
+    "feature_05",
+    "feature_06",
+    "feature_07",
+    "feature_08",
+    "feature_09",
+    "feature_10",
+    "feature_11"
+  ],
+  "id_columns": [
+    "category",
+    "record_id"
+  ],
+  "missing_values": {},
+  "sha256": "8427167ec5b57b949a13c65b03ae3c93be93d10e37f73ac99b848b77dcd07fe6"
+}
+findings: [
+  {
+    "input": "extra-column-probe",
+    "code": "SCHEMA_MISMATCH",
+    "verdict": "rejected",
+    "message": "new rows: feature schema mismatch",
+    "observed": {
+      "missing": [],
+      "extra": [
+        "unexpected_column"
+      ]
+    }
+  }
+]
+[colab] Executing cell 8/9 - tabpfn_classifier_artifact_inference-23...
+Running stage 'predict' in the isolated environment; log: /content/dimer_runs/tabpfn_classifier_artifact_inference/bf03f24c8058/logs/predict.log
+ category record_id prediction  proba_class_0  proba_class_1  proba_class_2
+segment_3 row-00427    class_1         0.0001         0.9974         0.0025
+segment_0 row-00156    class_2         0.0096         0.0119         0.9785
+segment_1 row-00381    class_2         0.0032         0.0074         0.9894
+segment_1 row-00317    class_2         0.0181         0.0087         0.9732
+segment_2 row-00286    class_2         0.0112         0.0039         0.9849
+segment_3 row-00435    class_1         0.0000         0.9985         0.0015
+segment_0 row-00120    class_1         0.0003         0.9940         0.0058
+segment_0 row-00272    class_2         0.0036         0.0036         0.9927
+{
+  "verdict": "not-measurable",
+  "sample_kind": "sample",
+  "reason": "no labelled validation split was scored"
+}
+[colab] Executing cell 9/9 - tabpfn_classifier_artifact_inference-26...
+Optional activity skipped: tick RUN_ACTIVITY to run it. The canonical outputs are complete.
+[colab] Saving notebook with outputs to '/home/kurt/colab-runs/tabpfn-classifier-pipeline-0e5a27c-9482e6/tabpfn_classifier_artifact_inference_colab_0e5a27c_colab-cli-t4_output.ipynb'...
