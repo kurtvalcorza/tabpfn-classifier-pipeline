@@ -45,7 +45,8 @@ def test_worker_and_token_paths_are_gone() -> None:
         code = _code(_load(name))
         for marker in ("worker.run(", "GITHUB_TOKEN", "git clone", "colab-bootstrap", "COMPONENTS.json", "TUTORIAL_REF", "import train as worker", "FINE_TUNE"):
             assert marker not in code, (name, marker)
-        assert re.search(r"github\.com/kurtvalcorza", code) is None, name
+        # Only the pinned sample bundle's release-asset URL of this repository may appear (SART6 / REL3).
+        assert _validator().ST1_PATTERN.search(code) is None, name
 
 
 def test_carried_lock_pins_every_pyproject_runtime_dependency() -> None:

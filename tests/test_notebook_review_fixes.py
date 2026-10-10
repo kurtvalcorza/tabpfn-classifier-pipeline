@@ -350,17 +350,99 @@ def test_S2_logistic_regression_reference(tmp_path) -> None:
 # ---------------------------------------------------------------- TPCA-M1: no sample yet — stop cleanly; builder ready
 
 
-def test_M1_default_path_without_a_sample_stops_naming_the_field(tmp_path, monkeypatch) -> None:
-    """TPCA-M1 (not fixed: needs a hosted run): with no carried sample the default path opens no dialog and stops naming
-    ARTIFACT_ZIP_PATH, instead of blocking on an upload."""
+PIN = json.loads((ROOT / "examples" / "sample_bundle_pin.json").read_text(encoding="utf-8"))
+
+
+def test_M1_default_path_uses_the_pinned_release_asset_and_opens_no_dialog(tmp_path, monkeypatch) -> None:
+    """TPCA-M1 / SART6: with every field empty, Section 4 passes the pinned sample (a release asset of this repository,
+    pinned by URL, size and SHA-256) to the artifact stage and opens no upload dialog; the pin names its producer (SART8)."""
     _no_colab(monkeypatch)
     ns, calls = _kernel(tmp_path)
     exec(compile(_cell_with(AI, "ARTIFACT_ZIP_PATH = ''  # @param"), "<s4>", "exec"), ns)
-    assert calls == [("artifact", {"source": "sample", "zip_path": "", "expected_zip_sha256": "", "expected_fitted_sha256": ""})]
-    root = tmp_path / "run"
-    run = _run(root, tmp_path / "outputs", {"source": "sample"}, module=AI_STAGES)
-    with pytest.raises(RuntimeError, match="No pinned sample bundle is carried .* Set ARTIFACT_ZIP_PATH"):
-        _quiet(AI_STAGES.stage_artifact, run)
+    assert calls == [("artifact", {"source": "sample", "zip_path": "", "expected_zip_sha256": "", "expected_fitted_sha256": "", "sample": PIN})]
+    assert PIN["url"] == f"https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/{PIN['tag']}/tabpfn_classifier_sample_bundle.zip"
+    assert PIN["tag"] == "sample-bundle-v1" and re.fullmatch(r"[0-9a-f]{64}", PIN["sha256"]) and PIN["sha256"] != "0" * 64 and PIN["bytes"] > 1000
+    for key in ("notebook", "notebook_blob", "commit", "run"):
+        assert PIN["producer"].get(key), key
+    assert ns["SAMPLE_ARTIFACT"] == PIN
+
+
+class _Served:
+    """A stand-in for urllib.request.urlopen that serves fixed bytes and counts calls."""
+
+    def __init__(self, data: bytes) -> None:
+        self.data, self.calls = data, 0
+
+    def __call__(self, url, timeout=0):
+        self.calls += 1
+        return contextlib.closing(types.SimpleNamespace(read=lambda n=-1: self.data[: n if n >= 0 else None], close=lambda: None))
+
+
+def _sample_asset(tmp_path: Path) -> tuple[Path, dict, object]:
+    builder = _load("tpc_build_sample_bundle_asset", TOOLS / "build_sample_bundle.py")
+    P = AI_STAGES.package(_run(tmp_path / "r0", tmp_path / "o0", module=AI_STAGES).root)
+    rows = tmp_path / "rows.csv"
+    rows.write_text("record_id,a\nr1,1.0\n")
+    pin = builder.build(_fake_bundle(tmp_path, P), rows, {"notebook": "t"}, tmp_path / "dist")
+    return tmp_path / "dist" / builder.ASSET, pin, builder
+
+
+def test_M1_sample_is_verified_before_extraction_and_reused(tmp_path) -> None:
+    """SART6: the stage refuses a download whose size or SHA-256 differs from the pin before anything is extracted, refuses a
+    non-release URL and an unexpected member list, extracts a verified asset, and reuses a verified copy without downloading."""
+    asset, pin, _builder = _sample_asset(tmp_path)
+    data = asset.read_bytes()
+    run = _run(tmp_path / "run", tmp_path / "outputs", module=AI_STAGES)
+    tampered = bytearray(data)
+    tampered[len(tampered) // 2] ^= 0xFF
+    with pytest.raises(ValueError, match="verification failed before extraction"):
+        _quiet(AI_STAGES.fetch_sample, run, pin, _Served(bytes(tampered)))
+    assert not (run.root / AI_STAGES.SAMPLE_DIR).exists()
+    with pytest.raises(ValueError, match="release asset of this repository"):
+        _quiet(AI_STAGES.fetch_sample, run, {**pin, "url": "https://example.org/releases/download/sample-bundle-v1/x.zip"}, _Served(data))
+    served = _Served(data)
+    _quiet(AI_STAGES.fetch_sample, run, pin, served)
+    assert served.calls == 1
+    assert sorted(p.name for p in (run.root / AI_STAGES.SAMPLE_DIR).iterdir()) == sorted(AI_STAGES.SAMPLE_MEMBERS)
+    again = _Served(b"")
+    _quiet(AI_STAGES.fetch_sample, run, pin, again)
+    assert again.calls == 0
+    extra = tmp_path / "extra.zip"
+    with zipfile.ZipFile(asset) as src, zipfile.ZipFile(extra, "w") as dst:
+        for name in src.namelist():
+            dst.writestr(name, src.read(name))
+        dst.writestr("notes.txt", "an extra member")
+    extra_pin = {**pin, "url": pin["url"].replace(".zip", "-extra.zip"), "bytes": extra.stat().st_size, "sha256": hashlib.sha256(extra.read_bytes()).hexdigest()}
+    with pytest.raises(ValueError, match="must hold exactly"):
+        _quiet(AI_STAGES.fetch_sample, run, extra_pin, _Served(extra.read_bytes()))
+
+
+def test_M1_stage_artifact_assembles_the_verified_sample_with_the_checkpoint(tmp_path, monkeypatch) -> None:
+    """The default path end to end up to validate_artifact_bundle: download (stand-in), verify, extract, check against
+    SAMPLE_BUNDLE.json, hard-link the verified checkpoint as model.ckpt, then validate with the trusted fitted digest."""
+    asset, pin, _builder = _sample_asset(tmp_path)
+    run = _run(tmp_path / "run", tmp_path / "outputs", {"source": "sample", "sample": pin}, module=AI_STAGES)
+    checkpoint = tmp_path / "ckpt.bin"
+    checkpoint.write_bytes(b"c" * 4096)
+    run.write_state("weights.json", {"checkpoint": str(checkpoint)})
+    served = _Served(asset.read_bytes())
+    monkeypatch.setattr(AI_STAGES.urllib.request, "urlopen", served)
+    seen = {}
+
+    def fake_validate(bundle, expected_fitted_sha256="", expected_checkpoint_sha256=""):
+        seen.update(members=sorted(p.name for p in Path(bundle).iterdir()), fitted=expected_fitted_sha256)
+        manifest = json.loads((Path(bundle) / "artifact_manifest.json").read_text())
+        return {**manifest, "verifiedSha256": {"fittedEstimator": expected_fitted_sha256, "foundationCheckpoint": expected_checkpoint_sha256}}
+
+    P = AI_STAGES.package(run.root)
+    monkeypatch.setattr(P, "validate_artifact_bundle", fake_validate)
+    _quiet(AI_STAGES.stage_artifact, run)
+    record = run.read_state("artifact.json", "test")
+    assert served.calls == 1 and record["zip_sha256"] == pin["sha256"] and record["source"] == "sample"
+    assert seen["members"] == sorted([P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, P.CHECKPOINT_NAME])
+    with zipfile.ZipFile(asset) as archive:
+        assert seen["fitted"] == json.loads(archive.read("SAMPLE_BUNDLE.json"))["files"]["model.tabpfn_fit"]["sha256"]
+    assert "before extraction" in record["trusted_digest"]
 
 
 def _fake_bundle(tmp_path: Path, P) -> Path:
@@ -379,21 +461,55 @@ def _fake_bundle(tmp_path: Path, P) -> Path:
     return zip_path
 
 
-def test_M1_sample_builder_writes_the_bundle_without_the_checkpoint(tmp_path) -> None:
-    """TPCA-M1: tools/build_sample_bundle.py turns a recorded E2E export into examples/sample-bundle/ (no model.ckpt)."""
-    builder = _load("tpc_build_sample_bundle", TOOLS / "build_sample_bundle.py")
-    P = AI_STAGES.package(_run(tmp_path / "r", tmp_path / "o", module=AI_STAGES).root)
-    zip_path = _fake_bundle(tmp_path, P)
-    rows = tmp_path / "rows.csv"
-    rows.write_text("record_id,a\nr1,1.0\n")
-    out = tmp_path / "sample"
-    record = builder.build(zip_path, rows, "test producer", out)
-    assert sorted(p.name for p in out.iterdir()) == ["SAMPLE_BUNDLE.json", "artifact_manifest.json", "model.tabpfn_fit", "new_rows.csv"]
-    assert record["checkpoint"]["sha256"] == P.WEIGHTS_SHA256 and builder.check(out) == 0
-    (out / "new_rows.csv").write_text("changed\n")
+def test_M1_sample_builder_writes_a_reproducible_asset_without_the_checkpoint(tmp_path) -> None:
+    """TPCA-M1: tools/build_sample_bundle.py turns a recorded E2E export into the release asset (no model.ckpt), byte for
+    byte reproducible, and --verify refuses any other file."""
+    asset, pin, builder = _sample_asset(tmp_path)
+    with zipfile.ZipFile(asset) as archive:
+        assert sorted(archive.namelist()) == sorted(builder.MEMBERS)
+        record = json.loads(archive.read("SAMPLE_BUNDLE.json"))
+    assert "model.ckpt" not in builder.MEMBERS and record["checkpoint"]["sha256"] == AI_STAGES.package(tmp_path / "r0").WEIGHTS_SHA256
+    assert pin["sha256"] == hashlib.sha256(asset.read_bytes()).hexdigest() and pin["bytes"] == asset.stat().st_size
+    again = builder.build(tmp_path / "bundle.zip", tmp_path / "rows.csv", {"notebook": "t"}, tmp_path / "dist2")
+    assert again["sha256"] == pin["sha256"]
+    pin_file = tmp_path / "pin.json"
+    pin_file.write_text(json.dumps(pin))
+    assert _quiet(builder.verify, asset, pin_file) == 0
+    asset.write_bytes(asset.read_bytes() + b"x")
     with contextlib.redirect_stderr(io.StringIO()):
-        assert builder.check(out) == 1
-    assert builder.check(tmp_path / "absent") == 0
+        assert builder.verify(asset, pin_file) == 1
+
+
+def test_st1_allows_only_this_repositorys_release_asset_url() -> None:
+    """REL3 / SART6: the validator's repository-clone rule (ST1) admits the pinned release-asset URL of this repository and
+    nothing else from github.com/kurtvalcorza."""
+    validator = _load("tpc_validate_release_assets", TOOLS / "validate_release_assets.py")
+    allowed = [f"'{PIN['url']}'", "'https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/'"]
+    refused = [
+        "'https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/archive/refs/heads/main.zip'",
+        "'https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/sample-bundle-v1/x.tar.gz'",
+        "'https://github.com/kurtvalcorza/mitra-classifier-pipeline/releases/download/sample-bundle-v1/x.zip'",
+        "'https://github.com/kurtvalcorza/tabpfn-classifier-pipeline.git'",
+        "git clone https://example.org/x",
+    ]
+    assert not [u for u in allowed if validator.ST1_PATTERN.search(u)]
+    assert all(validator.ST1_PATTERN.search(u) for u in refused)
+
+
+@pytest.mark.parametrize("template", ["notebook_template.py", "notebook_template_artifact_inference.py"])
+def test_stage_processes_import_neither_ipython_nor_google_colab(template: str) -> None:
+    """Stages run in the isolated environment, which has neither IPython nor google.colab: only kernel cells may use them
+    (the upload dialogs). There is no worker and no google.colab stub that would need a ModuleSpec (ENV15); a carried
+    module importing either would fail on Colab (swin2sr-x4-super-resolution-pipeline 34eac6c / tirex 9ee5922 pattern)."""
+    build = _load(f"tpc_build_notebook_{template[:-3]}", TOOLS / "build_notebook.py")
+    tpl = _load(f"tpc_{template[:-3]}", TOOLS / template).TEMPLATE
+    carried = [ROOT / source for dest, source in build.carried_sources(ROOT, tpl).items() if dest.endswith(".py")]
+    assert {p.name for p in carried} >= {"pipeline.py", Path(tpl["stage_runner"]).name}
+    offenders = [str(p) for p in carried if re.search(r"^\s*(from|import)\s+(IPython|google)\b", p.read_text(encoding="utf-8"), re.M)]
+    assert not offenders, offenders
+    text = (ROOT / "tutorials" / tpl["notebook_name"]).read_text(encoding="utf-8")
+    assert "sys.modules['google" not in text and 'sys.modules[\\"google' not in text and "_WORKER_SOURCE" not in text
+    assert "IPython" not in text
 
 
 # ---------------------------------------------------------------- TPCA-m2: members and digests

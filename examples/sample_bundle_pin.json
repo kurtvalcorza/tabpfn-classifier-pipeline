@@ -1,0 +1,14 @@
+{
+  "url": "https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/sample-bundle-v1/tabpfn_classifier_sample_bundle.zip",
+  "tag": "sample-bundle-v1",
+  "bytes": 169881,
+  "sha256": "d61f1c2642154c2ab0d7a81954ec6522a908e690177f9723563ab44054fde0ba",
+  "producer": {
+    "notebook": "tutorials/tabpfn_classifier_colab.ipynb",
+    "notebook_blob": "a4c8b2904e710d3b2cb260971de37cd9737f5355",
+    "commit": "08dbf959aac546bc073c8d88e15a75cac8a70216",
+    "runtime": "Linux x86_64 (WSL2), CPU only (CUDA_VISIBLE_DEVICES=-1), the notebook's own isolated hash-locked uv environment (tutorials/requirements-colab.lock.txt), code cells driven in order by a plain-CPython stand-in kernel, default form values (synthetic sample, N_ESTIMATORS=4)",
+    "run": "2026-10-10 local lock-only CPU run, 11/11 code cells, 210.6 s; fresh-boundary verification PASSED; not clean-runtime evidence",
+    "run_record": "notebook-review relay ledger fixes/cloud-tabpfn-classifier-pipeline/drive-e2e-2026-10-10.log"
+  }
+}

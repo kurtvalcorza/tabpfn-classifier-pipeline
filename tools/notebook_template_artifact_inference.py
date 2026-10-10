@@ -2,10 +2,12 @@
 
 Generate with ``python tools/build_notebook.py --template tools/notebook_template_artifact_inference.py``. The notebook
 carries the same package and pinned checkpoint manifest as the E2E notebook and its own stage runner
-(``tools/tutorial_stages_artifact_inference.py``). When ``examples/sample-bundle/`` exists (manifest, fitted archive, eight
-unlabelled rows, produced from a recorded hosted E2E run by ``tools/build_sample_bundle.py``), it is carried too and the
-default path uses it with the checkpoint verified in Section 3. A user bundle ZIP (``ARTIFACT_ZIP_PATH`` or an upload) is
-checked against ``EXPECTED_ZIP_SHA256`` / ``EXPECTED_FITTED_SHA256``. The notebook never creates a bundle.
+(``tools/tutorial_stages_artifact_inference.py``). The default path downloads the trusted sample bundle pinned in
+``examples/sample_bundle_pin.json`` (NOTEBOOK_SPEC SART6-SART8: release asset ``sample-bundle-v1`` of this repository,
+written by ``tools/build_sample_bundle.py`` from a recorded run of the E2E notebook; manifest, fitted archive and eight
+unlabelled rows, no checkpoint) and verifies its size and SHA-256 before extraction, then assembles it with the checkpoint
+verified in Section 3. A user bundle ZIP (``ARTIFACT_ZIP_PATH`` or an upload) is checked against ``EXPECTED_ZIP_SHA256`` /
+``EXPECTED_FITTED_SHA256``. The notebook never creates a bundle.
 """
 # ruff: noqa: E501  -- markdown prose and code-cell text are kept on single lines for readable rendering
 
@@ -18,22 +20,15 @@ assert _spec and _spec.loader
 _e2e_module = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_e2e_module)
 BADGES, REPO, ENVIRONMENT, RUNTIME_PREREQ, LICENCE_PREREQ = _e2e_module.BADGES, _e2e_module.REPO, _e2e_module.ENVIRONMENT, _e2e_module.RUNTIME_PREREQ, _e2e_module.LICENCE_PREREQ
-_SAMPLE_DIR = Path(__file__).resolve().parents[1] / "examples" / "sample-bundle"
-SAMPLE = json.loads((_SAMPLE_DIR / "SAMPLE_BUNDLE.json").read_text(encoding="utf-8")) if (_SAMPLE_DIR / "SAMPLE_BUNDLE.json").is_file() else None
-
-if SAMPLE:
-    _CARRIED_EXTRA = {f"sample-bundle/{n}": f"examples/sample-bundle/{n}" for n in ("artifact_manifest.json", "new_rows.csv", "SAMPLE_BUNDLE.json")}
-    _CARRIED_BINARY = {"sample-bundle/model.tabpfn_fit": "examples/sample-bundle/model.tabpfn_fit"}
-    _DEFAULT_PATH = (
-        "assembles the carried **sample bundle** (`examples/sample-bundle/`, produced from a recorded E2E run; its files are checked against `SAMPLE_BUNDLE.json`) with the checkpoint verified in Section 3 as its `model.ckpt`; validates the bundle; rebuilds the estimator from it without refitting; validates the eight carried unlabelled sample rows into an input manifest; predicts with class probabilities, reports what cannot be measured, and exports outputs. No upload dialog is opened."
-    )
-    _SAMPLE_PREREQ = "- **Bundle:** by default the carried sample bundle (`examples/sample-bundle/`: `artifact_manifest.json`, `model.tabpfn_fit`; produced from a recorded hosted run of the E2E notebook by `tools/build_sample_bundle.py`) plus the verified checkpoint as its `model.ckpt`; optionally your own ZIP exported by the E2E notebook, by `ARTIFACT_ZIP_PATH` or upload, with the digests it printed."
-else:
-    _CARRIED_EXTRA, _CARRIED_BINARY = {}, {}
-    _DEFAULT_PATH = (
-        "stops in Section 4 with a message naming `ARTIFACT_ZIP_PATH`: **this revision carries no pinned sample bundle yet** (a TabPFN fitted archive can only be produced by a real TabPFN fit, and none has been recorded; `tools/build_sample_bundle.py` adds one from a hosted E2E run). With `ARTIFACT_ZIP_PATH` (and `NEW_DATA_PATH`) set to the E2E notebook's exports it validates the bundle, rebuilds the estimator without refitting, validates the rows, predicts with class probabilities, reports what cannot be measured, and exports outputs. No upload dialog opens unless you tick `UPLOAD_ARTIFACT` / `UPLOAD_NEW_DATA`."
-    )
-    _SAMPLE_PREREQ = "- **Bundle:** the ZIP the E2E notebook exported (`outputs/tabpfn_classifier_artifact.zip`), by `ARTIFACT_ZIP_PATH` or upload, with the digests it printed. No pinned sample bundle is carried by this revision yet (see Run all)."
+# The trusted sample artifact (SART6): a release asset of this repository, pinned by URL, size and SHA-256.
+SAMPLE_PIN = Path(__file__).resolve().parents[1] / "examples" / "sample_bundle_pin.json"
+SAMPLE_ARTIFACT = json.loads(SAMPLE_PIN.read_text(encoding="utf-8"))
+_SAMPLE_LITERAL = repr(SAMPLE_ARTIFACT).replace("{", "{{").replace("}", "}}")
+_CARRIED_EXTRA, _CARRIED_BINARY = {}, {}
+_DEFAULT_PATH = (
+    "downloads the **trusted sample bundle** pinned in Section 4 (release asset `" + SAMPLE_ARTIFACT["tag"] + "` of this repository, written by the E2E notebook in a recorded run; about " + str(round(SAMPLE_ARTIFACT["bytes"] / 1024)) + " KB, no sign-in) and checks its size and SHA-256 **before extraction**; assembles it with the checkpoint verified in Section 3 as its `model.ckpt`; validates the bundle; rebuilds the estimator from it without refitting; validates the sample's eight unlabelled rows into an input manifest; predicts with class probabilities, reports what cannot be measured, and exports outputs. No upload dialog is opened."
+)
+_SAMPLE_PREREQ = "- **Bundle:** by default the trusted sample bundle (release asset `" + SAMPLE_ARTIFACT["tag"] + "` of this repository: `artifact_manifest.json`, `model.tabpfn_fit`, eight unlabelled rows and their digest record `SAMPLE_BUNDLE.json`; no checkpoint), produced by the E2E notebook and pinned by URL and SHA-256, plus the verified checkpoint as its `model.ckpt`; optionally your own ZIP exported by the E2E notebook, by `ARTIFACT_ZIP_PATH` or upload, with the digests it printed."
 
 TEMPLATE = {
     **ENVIRONMENT,
@@ -105,9 +100,12 @@ TEMPLATE = {
                 "packaged in-context classifier is reused safely by someone else: checking what was received, rebuilding it, and "
                 "scoring new rows. You need to be able to run notebook cells and read short Python; the glossary explains every "
                 "term.\n\n"
-                "**Running it.** Run the E2E notebook first and keep its `outputs/tabpfn_classifier_artifact.zip`, the digests it "
-                "printed and `outputs/tabpfn_classifier_new_rows.csv`. Put them in this runtime, set `ARTIFACT_ZIP_PATH`, the two "
-                "digests and `NEW_DATA_PATH`, then *Runtime → Run all*. No account, token or runtime restart is needed.\n\n"
+                "**Running it.** Choose *Runtime → Run all*. The default path needs no edit, no upload, no account, no token and "
+                "no runtime restart: it downloads the trusted sample bundle pinned in Section 4 (a bundle the E2E notebook "
+                "exported, with its eight unlabelled rows) and refuses it unless its SHA-256 matches. To score your own bundle, "
+                "run the E2E notebook, keep its `outputs/tabpfn_classifier_artifact.zip`, the digests it printed and "
+                "`outputs/tabpfn_classifier_new_rows.csv`, put them in this runtime, and set `ARTIFACT_ZIP_PATH`, the two digests "
+                "and `NEW_DATA_PATH`.\n\n"
                 "**Where the code runs.** The notebook kernel installs nothing and imports no model library. Each learner cell "
                 "calls `run_stage('…')`, which runs one stage of the carried stage runner in its own process and stops the "
                 "notebook with the stage's own error message if it fails.\n\n"
@@ -166,8 +164,11 @@ TEMPLATE = {
             "md": (
                 "## 4. Verify the bundle before any model state is loaded · [Engineering]\n\n"
                 "The `artifact` stage takes the bundle from `ARTIFACT_ZIP_PATH` (a ZIP already in the runtime), from the upload "
-                "dialog (`UPLOAD_ARTIFACT`, Colab), or — with both empty — from the carried pinned sample bundle when this "
-                "revision carries one; otherwise it stops with a message naming `ARTIFACT_ZIP_PATH`. For a ZIP it first checks "
+                "dialog (`UPLOAD_ARTIFACT`, Colab), or — with both empty — from the trusted sample bundle pinned in "
+                "`SAMPLE_ARTIFACT` (release asset `" + SAMPLE_ARTIFACT["tag"] + "` of this repository, written by the E2E notebook "
+                "in a recorded run): it is downloaded once and refused unless its size and whole-archive SHA-256 equal the pin and "
+                "it holds exactly its four files; each file is then checked against the digest record `SAMPLE_BUNDLE.json`, and "
+                "the pinned checkpoint from Section 3 becomes its `model.ckpt`. For your own ZIP it first checks "
                 "`EXPECTED_ZIP_SHA256`, then reads the member list and **refuses** anything but `artifact_manifest.json`, "
                 "`model.tabpfn_fit` and `model.ckpt`, each once at the top level (an extra `notes.txt`, or a `sub/model.ckpt` that "
                 "flattening would let overwrite `model.ckpt`), and only then extracts member by member with `safe_extract_zip`. "
@@ -181,7 +182,10 @@ TEMPLATE = {
                 "ARTIFACT_ZIP_PATH = ''  # @param {{type:\"string\"}}\n"
                 "UPLOAD_ARTIFACT = False  # @param {{type:\"boolean\"}}\n"
                 "EXPECTED_ZIP_SHA256 = ''  # @param {{type:\"string\"}}\n"
-                "EXPECTED_FITTED_SHA256 = ''  # @param {{type:\"string\"}}\n\n"
+                "EXPECTED_FITTED_SHA256 = ''  # @param {{type:\"string\"}}\n"
+                "# The trusted sample artifact (NOTEBOOK_SPEC SART6-SART8): a release asset of this repository written by the E2E\n"
+                "# notebook in a recorded run, pinned by URL, size and SHA-256; checked before extraction. Do not edit.\n"
+                "SAMPLE_ARTIFACT = " + _SAMPLE_LITERAL + "\n\n"
                 "def upload_one(what, field):\n"
                 "    try:\n"
                 "        from google.colab import files\n"
@@ -202,7 +206,7 @@ TEMPLATE = {
                 "    artifact_source, zip_path = 'path', ARTIFACT_ZIP_PATH\n"
                 "elif UPLOAD_ARTIFACT:\n"
                 "    artifact_source, zip_path = 'upload', upload_one('the bundle ZIP', 'ARTIFACT_ZIP_PATH')\n"
-                "run_stage('artifact', source=artifact_source, zip_path=zip_path, expected_zip_sha256=EXPECTED_ZIP_SHA256, expected_fitted_sha256=EXPECTED_FITTED_SHA256)"
+                "run_stage('artifact', source=artifact_source, zip_path=zip_path, expected_zip_sha256=EXPECTED_ZIP_SHA256, expected_fitted_sha256=EXPECTED_FITTED_SHA256, sample=SAMPLE_ARTIFACT)"
             ),
         },
         {
@@ -320,7 +324,8 @@ TEMPLATE = {
         "| Symptom | Likely cause | What to do |\n"
         "|---|---|---|\n"
         "| Section 1–3 failures (platform, disk, `uv`, Hub download, digest) | as in the E2E notebook | See its Troubleshooting; never remove a pin, a hash or a manifest digest. |\n"
-        "| `No pinned sample bundle is carried by this notebook revision` | the default path without a sample | Set `ARTIFACT_ZIP_PATH` to the E2E notebook's `outputs/tabpfn_classifier_artifact.zip` and paste its digests. |\n"
+        "| `Sample bundle verification failed before extraction` | a truncated download or a changed release asset | Run Section 4 again; if it persists, do not proceed (the pinned asset is never replaced, so a mismatch means the file is not the published one). |\n"
+        "| `HTTP Error` / `URLError` in Section 4 | no internet access to github.com | Enable internet access, or use your own bundle with `ARTIFACT_ZIP_PATH`. |\n"
         "| `Trusted digest mismatch for …` | the file is not the one the digest was issued for | Do not proceed; obtain the bundle and digests from the producer again. |\n"
         "| `EXPECTED_…_SHA256 must be 64 hexadecimal characters` | a truncated digest | Paste the full digest the E2E notebook printed. |\n"
         "| `No trusted digest was supplied` (a warning) | your bundle without a digest | It runs, but only internal consistency is checked. |\n"

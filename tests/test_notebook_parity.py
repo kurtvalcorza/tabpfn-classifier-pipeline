@@ -101,6 +101,12 @@ def test_st1_primary_path_has_no_repository_dependency(name: str) -> None:
     own = "\n".join(_source(c) for c in notebook["cells"] if c["cell_type"] == "code" and not c.get("metadata", {}).get("dimer", {}).get("embedded_sources"))
     assert f"import {TEMPLATES[name]['package']}" not in own
     assert f"from {TEMPLATES[name]['package']}" not in own
+    if name == "notebook_template_artifact_inference":
+        # SART6 / ST1 fleet pattern: exactly the pinned release-asset URL is allowed (it carries a SHA-256 in
+        # SAMPLE_ARTIFACT); any other repository URL still fails.
+        pin = json.loads((ROOT / "examples/sample_bundle_pin.json").read_text(encoding="utf-8"))
+        assert own.count(pin["url"]) == 1 and pin["sha256"] in own
+        own = own.replace(pin["url"], "")
     assert "github.com/kurtvalcorza" not in own
     assert "git clone" not in own
     assert "worker.run(" not in own and "worker_cli(" not in own

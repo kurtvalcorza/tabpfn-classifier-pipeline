@@ -8,7 +8,6 @@ both templates.
 from __future__ import annotations
 
 import ast
-import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -37,19 +36,19 @@ def test_companion_shares_the_primary_package_keys() -> None:
         assert TEMPLATE.get(key) == PRIMARY.get(key), key
 
 
-def test_sample_bundle_is_carried_exactly_when_it_exists() -> None:
-    """TPCA-M1: the sample cannot be produced offline; when tools/build_sample_bundle.py has added it, it is carried."""
-    record_path = ROOT / "examples/sample-bundle/SAMPLE_BUNDLE.json"
-    carried = set(TEMPLATE["carried_extra"]) | set(TEMPLATE["carried_binary"])
-    if not record_path.is_file():
-        assert carried == set() and TEMPLATE_MODULE.SAMPLE is None
-        assert "carries no pinned sample bundle yet" in TEMPLATE["run_all"]
-        return
-    record = json.loads(record_path.read_text(encoding="utf-8"))
-    assert carried == {"sample-bundle/artifact_manifest.json", "sample-bundle/model.tabpfn_fit", "sample-bundle/new_rows.csv", "sample-bundle/SAMPLE_BUNDLE.json"}
-    for name, facts in record["files"].items():
-        data = (ROOT / "examples/sample-bundle" / name).read_bytes()
-        assert len(data) == facts["bytes"] and hashlib.sha256(data).hexdigest() == facts["sha256"], name
+def test_sample_bundle_is_a_pinned_release_asset_not_carried() -> None:
+    """TPCA-M1 / SART6: the default sample is the release asset pinned in examples/sample_bundle_pin.json (URL, size,
+    SHA-256, producer); nothing of it is carried in the notebook, and the pin is a real one, not a placeholder."""
+    pin = json.loads((ROOT / "examples/sample_bundle_pin.json").read_text(encoding="utf-8"))
+    assert pin == TEMPLATE_MODULE.SAMPLE_ARTIFACT
+    assert not any("sample-bundle" in k for k in (*TEMPLATE["carried_extra"], *TEMPLATE["carried_binary"]))
+    assert not (ROOT / "examples/sample-bundle").exists()
+    assert pin["url"] == f"https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/{pin['tag']}/tabpfn_classifier_sample_bundle.zip"
+    assert len(pin["sha256"]) == 64 and set(pin["sha256"]) <= set("0123456789abcdef") and pin["sha256"] != "0" * 64
+    assert pin["bytes"] > 1000
+    assert {"notebook", "notebook_blob", "commit", "runtime", "run_record"} <= set(pin["producer"])
+    nb = (ROOT / "tutorials" / TEMPLATE["notebook_name"]).read_text(encoding="utf-8")
+    assert pin["sha256"] in nb and str(pin["bytes"]) in nb
 
 
 def test_companion_never_self_produces() -> None:

@@ -82,8 +82,17 @@ download; they are measurements for the stated runtime, not general estimates.
 
 | Date (UTC) | Commit / notebook blob | Executor | Path exercised | Wall | Outcome |
 |---|---|---|---|---|---|
-| 2026-09-14 | `1d93609` / `ccdcd20093ed` | Kaggle CPU (`kurtvalcorza/dimer-nb2-tabpfn-classifier` v1) | Default sample path | 203.5 s | **PASSED** — 10/10 ok code cells executed cleanly, 10 files, 213 MB staged |
-| | | | Artifact inference, bundle from the run above | | pending — queued to the executor lane |
+| 2026-09-14 | `1d93609` / `ccdcd20093ed` | Kaggle CPU (`kurtvalcorza/dimer-nb2-tabpfn-classifier` v1; image torch 2.10.0+cpu) | E2E, default sample path | 203.5 s | **PASSED** — 10/10 ok code cells, `restarted`: no (none recorded), 10 files, 213 MB staged. Metrics and package versions were not captured by that executor's ledger. A Kaggle CPU image, not Colab, and an earlier blob than the current E2E notebook, so it is not evidence for the current candidate |
+| | | | Artifact inference | | pending — no run recorded; its default path needs the `sample-bundle-v1` release asset, which is not yet published |
+
+### Local lock-only drives (not clean-runtime evidence)
+
+Code cells driven in order by a plain-CPython stand-in kernel on Linux x86_64 (WSL2), CPU only (`CUDA_VISIBLE_DEVICES=-1`), inside each notebook's own isolated hash-locked uv environment (CPython 3.12.12; torch 2.11.0, tabpfn 8.1.0, numpy 2.5.3, pandas 2.3.2, scikit-learn 1.9.0; 63 locked packages), default form values. The checkpoint was copied in from a local checkout and digest-verified (`d0d865d5…`), so the Hub download was not exercised; no notebook kernel, no Colab.
+
+| Date (UTC) | Commit / notebook blob | Path exercised | Wall | Outcome |
+|---|---|---|---|---|
+| 2026-10-10 | `08dbf95` / `a4c8b2904e71` | E2E, default synthetic sample, `N_ESTIMATORS=4` | 210.6 s | 11/11 code cells ok, `restarted`: no. Majority-class baseline val accuracy 0.3333; logistic regression val 0.9111 / test 0.9444; TabPFN val accuracy 0.9778, log loss 0.0668, ROC AUC 0.9994; test 0.9778 / 0.0804 / 0.9972. Fresh-boundary reload PASSED (rtol 1e-5, atol 1e-6). Its exports are the producer of `sample-bundle-v1` |
+| 2026-10-10 | working tree on `08dbf95` / `6d7b0040df03` | Artifact inference, default pinned sample (pre-seeded, so the release download was not exercised), then the tamper activity | 108.1 s | 9/9 code cells ok, `restarted`: no. Sample verified before extraction (169,881 bytes, `d61f1c2642154c2a…`); predictions on the eight rows identical to the E2E run's; the tampered `model.tabpfn_fit` was refused before loading |
 
 ### History: previous (worker-driven, NOTEBOOK_SPEC 1.0) notebook pair
 
@@ -104,13 +113,13 @@ clean Colab record, are both still required before either notebook is marked rel
 
 ## Current status
 
-No clean-runtime execution of the standalone notebooks has been recorded yet; the runs are **pending** and queued to the
-executor lane. Static validation (`tools/validate_release_assets.py`), the generator parity checks, a `compile()` sweep
+No clean-runtime execution of the current standalone notebook blobs has been recorded; the only clean-room run is the
+Kaggle CPU run of an earlier E2E blob above, and the companion has none. Both runs are **pending**. Static validation (`tools/validate_release_assets.py`), the generator parity checks, a `compile()` sweep
 over every code cell, and the offline unit suite passed on the tutorial source at the candidate revision, which is
 necessary but not sufficient. The registry status remains **Candidate** until a reviewer confirms recorded runs against
 the notebook blobs under review and an integrator promotes them; promotion is not performed by the builder. Facts a
-reviewer should weigh: the pinned checkpoint `tabpfn-v3-classifier-v3_default.ckpt` has never been staged or loaded locally (the manifest's digest
-comes from the Hub API; `verify_snapshot` was exercised on the three small files only); the module's `tabpfn` calls
-(`TabPFNClassifier(model_path=...)`, `save_fitted_tabpfn_model`, `load_fitted_tabpfn_model`) were exercised only
-through injected fakes in the unit suite — the real-package path runs for the first time in the clean run; the
+reviewer should weigh: the pinned checkpoint `tabpfn-v3-classifier-v3_default.ckpt` was staged by the Kaggle run and
+staged, digest-verified and loaded in the 2026-10-10 local lock-only drives; the module's `tabpfn` calls
+(`TabPFNClassifier(model_path=...)`, `save_fitted_tabpfn_model`, `load_fitted_tabpfn_model`) ran on the real package in
+those drives, and only through injected fakes in the unit suite; the
 standalone carrier was validated statically and by a CPU carrier probe (module cells + identity assertion, no fetch).

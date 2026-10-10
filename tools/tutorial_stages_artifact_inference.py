@@ -7,9 +7,11 @@ notebook kernel and no bundle is created here.
 A bundle is ``artifact_manifest.json`` + ``model.tabpfn_fit`` (the fitted estimator state, written by tabpfn's
 ``save_fitted_tabpfn_model``) + ``model.ckpt`` (a byte copy of the pinned foundation checkpoint). Because ``model.ckpt``
 must equal the pinned checkpoint, which Section 3 stages and digest-verifies, a pinned sample bundle needs only the
-manifest and the fitted archive: when ``examples/sample-bundle/`` is carried, the default path assembles it with the
-verified checkpoint. The sample can only be produced by a real TabPFN fit, so it is added from a recorded hosted E2E run
-with ``tools/build_sample_bundle.py``; until then the default path stops with a message naming ``ARTIFACT_ZIP_PATH``.
+manifest and the fitted archive. The default path downloads the pinned sample bundle (NOTEBOOK_SPEC SART6-SART8: a
+release asset of this repository, ``SAMPLE_BUNDLE.json`` + manifest + fitted archive + eight unlabelled rows, written by
+``tools/build_sample_bundle.py`` from a recorded run of the E2E notebook), checks its size and whole-archive SHA-256 and
+its member list **before extraction**, checks each file against ``SAMPLE_BUNDLE.json``, and assembles it with the
+verified checkpoint.
 
 Stages: weights → artifact → reconstruct → rows → predict, plus the optional ``activity`` (a tampered-bundle check).
 ``check_trusted_digest``, ``check_members``, ``check_numeric_features`` and the ``rows`` stage import no model library,
@@ -26,7 +28,10 @@ import math
 import re
 import shutil
 import sys
+import time
 import traceback
+import urllib.error
+import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -37,11 +42,9 @@ SAMPLE_DIR = "sample-bundle"
 SAMPLE_RECORD = "sample-bundle/SAMPLE_BUNDLE.json"
 SAMPLE_ROWS = "sample-bundle/new_rows.csv"
 SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
-NO_SAMPLE = (
-    "No pinned sample bundle is carried by this notebook revision: a TabPFN bundle's fitted archive can only be produced "
-    "by a real fit, and none has been recorded yet. Set ARTIFACT_ZIP_PATH to the bundle the E2E notebook exported "
-    "(outputs/tabpfn_classifier_artifact.zip) and paste the digests it printed, or tick UPLOAD_ARTIFACT in Colab."
-)
+SAMPLE_MEMBERS = ("SAMPLE_BUNDLE.json", "artifact_manifest.json", "model.tabpfn_fit", "new_rows.csv")
+# The only location a pinned sample may come from: a release asset of this repository (SART6, REL3).
+SAMPLE_URL_PREFIX = "https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/"
 
 
 class Run:
@@ -170,10 +173,53 @@ def clear_outputs(run: Run) -> list[str]:
     return removed
 
 
+def _download(url: str, destination: Path, limit: int, opener=None) -> None:
+    """Fetch ``url`` to ``destination`` (at most ``limit`` + 1 bytes read), with three attempts and back-off."""
+    opener = opener or urllib.request.urlopen
+    for attempt in range(3):
+        try:
+            with opener(url, timeout=120) as response:
+                destination.write_bytes(response.read(limit + 1))
+            return
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            if attempt == 2:
+                raise
+            time.sleep(2 ** (attempt + 1))
+
+
+def fetch_sample(run: Run, sample: dict[str, Any], opener=None) -> dict[str, Any]:
+    """SART6: download the pinned sample bundle (or reuse a verified copy), refuse it unless its size and whole-archive
+    SHA-256 equal the pin and it holds exactly the expected members, and only then extract it into the run directory."""
+    url, expected, size = str(sample.get("url", "")), str(sample.get("sha256", "")).lower(), int(sample.get("bytes", 0))
+    if not url.startswith(SAMPLE_URL_PREFIX) or not SHA256_HEX.match(expected) or size <= 0:
+        raise ValueError("SAMPLE_ARTIFACT must name a release asset of this repository with its byte size and SHA-256; regenerate the notebook.")
+    cache = run.weights / "sample-artifact"
+    cache.mkdir(parents=True, exist_ok=True)
+    zip_path = cache / PurePosixPath(url).name
+    reused = zip_path.is_file() and zip_path.stat().st_size == size and sha256_file(zip_path) == expected
+    if not reused:
+        partial = zip_path.with_suffix(".part")
+        _download(url, partial, size, opener)
+        observed_size, observed = partial.stat().st_size, sha256_file(partial)
+        if observed_size != size or observed != expected:
+            partial.unlink(missing_ok=True)
+            raise ValueError(f"Sample bundle verification failed before extraction: {url} gave {observed_size} bytes with SHA-256 {observed}; the pin is {size} bytes, {expected}. Nothing was extracted or loaded.")
+        partial.replace(zip_path)
+    with zipfile.ZipFile(zip_path) as archive:
+        names = sorted(info.filename for info in archive.infolist() if not info.is_dir())
+    if names != sorted(SAMPLE_MEMBERS):
+        raise ValueError(f"{zip_path.name}: the sample bundle must hold exactly {sorted(SAMPLE_MEMBERS)} at the top level, got {names}. Refusing it.")
+    target = run.root / SAMPLE_DIR
+    shutil.rmtree(target, ignore_errors=True)
+    package(run.root).safe_extract_zip(zip_path, target)
+    print({"sample_artifact": url, "bytes": size, "sha256": expected, "verified_before_extraction": True, "reused_download": reused, "producer": sample.get("producer")})
+    return {"url": url, "zip": zip_path, "sha256": expected}
+
+
 def assemble_sample(run: Run, P, bundle: Path) -> dict[str, Any]:
     record_path = run.root / SAMPLE_RECORD
     if not record_path.is_file():
-        raise RuntimeError(NO_SAMPLE)
+        raise RuntimeError("The verified sample bundle has no SAMPLE_BUNDLE.json: run Section 4 again (it downloads and verifies the sample).")
     record = json.loads(record_path.read_text(encoding="utf-8"))
     bundle.mkdir(parents=True)
     for name in (P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME):
@@ -187,7 +233,7 @@ def assemble_sample(run: Run, P, bundle: Path) -> dict[str, Any]:
         target.hardlink_to(base)
     except OSError:
         shutil.copyfile(base, target)
-    return {"trusted_digest": "verified (sample files against SAMPLE_BUNDLE.json; model.ckpt is the checkpoint verified in Section 3)", "expected_fitted_sha256": record["files"][P.FITTED_NAME]["sha256"], "producer": record.get("producer")}
+    return {"trusted_digest": "verified (pinned release-asset SHA-256 before extraction; sample files against SAMPLE_BUNDLE.json; model.ckpt is the checkpoint verified in Section 3)", "expected_fitted_sha256": record["files"][P.FITTED_NAME]["sha256"], "producer": record.get("producer")}
 
 
 def stage_artifact(run: Run) -> None:
@@ -203,9 +249,10 @@ def stage_artifact(run: Run) -> None:
     shutil.rmtree(bundle, ignore_errors=True)
     expected_fitted = check_digest_format(opts.get("expected_fitted_sha256", ""), "EXPECTED_FITTED_SHA256")
     if source == "sample":
+        fetched = fetch_sample(run, opts.get("sample") or {})
         trust = assemble_sample(run, P, bundle)
         expected_fitted = expected_fitted or trust["expected_fitted_sha256"]
-        zip_name = zip_sha = None
+        zip_name, zip_sha = fetched["zip"].name, fetched["sha256"]
     elif source in ("path", "upload"):
         zip_path = Path(opts.get("zip_path") or "")
         if not str(zip_path) or not zip_path.is_file():
