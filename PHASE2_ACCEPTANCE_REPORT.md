@@ -105,4 +105,4 @@ D1/D2 are fixed and merged (finetuner `e93649a`); `COMPONENTS.json` has since ad
 
 ## Reproducibility
 
-All harness scripts and the isolated run tree live under the session scratchpad and `/home/kurt/phase2` in the `nvidia-docker` distro (dataset, negatives, `output-v2`, `output-v3`, `results`, `model-cache`). Cached weights: v2 `tabpfn-v2-classifier-finetuned-zk73skhh.ckpt` (29,009,539 B) and v3 `model-cache/v3/tabpfn-v3-classifier-v3_default.ckpt` (212,804,803 B). The v3 base was obtained under the owner's accepted HuggingFace gate for non-commercial use.
+All harness scripts and the isolated run tree live under the session scratchpad and `<local-run-dir>` in the `nvidia-docker` distro (dataset, negatives, `output-v2`, `output-v3`, `results`, `model-cache`). Cached weights: v2 `tabpfn-v2-classifier-finetuned-zk73skhh.ckpt` (29,009,539 B) and v3 `model-cache/v3/tabpfn-v3-classifier-v3_default.ckpt` (212,804,803 B). The v3 base was obtained under the owner's accepted HuggingFace gate for non-commercial use.
