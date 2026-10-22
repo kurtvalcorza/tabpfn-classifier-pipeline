@@ -13,6 +13,7 @@ import base64
 import hashlib
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -106,3 +107,21 @@ def test_st1_primary_path_has_no_repository_dependency(name: str) -> None:
     assert "github.com/kurtvalcorza" not in own
     assert "git clone" not in own
     assert "worker.run(" not in own and "worker_cli(" not in own
+
+
+# REL14: a notebook cannot truthfully state its own run status, because any regeneration makes such a claim stale.
+# Recorded runs live in docs/release-verification.md, which the notebook points to instead.
+STALE_RUN_STATUS = re.compile(
+    r"no (hosted |recorded )?runs? (of|for) this (revision|blob|notebook)|this (revision|blob|notebook) has (not|never) (yet )?been (run|executed)"
+    r"|(has been|is) recorded yet|no recorded run[^.]*exists yet",
+    re.IGNORECASE,
+)
+
+
+@pytest.mark.parametrize("name", sorted(TEMPLATES))
+def test_rel14_notebook_makes_no_run_status_claim_about_its_own_revision(name: str) -> None:
+    notebook = _notebook(TEMPLATES[name])
+    own = "\n".join(_source(c) for c in notebook["cells"] if not c.get("metadata", {}).get("dimer", {}).get("embedded_sources"))
+    match = STALE_RUN_STATUS.search(own)
+    assert match is None, f"self-referential run-status claim in the notebook: {match.group(0) if match else ''!r}"
+    assert "docs/release-verification.md" in own, "the notebook must point to docs/release-verification.md for recorded runs"
