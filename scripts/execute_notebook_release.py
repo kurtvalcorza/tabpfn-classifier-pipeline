@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Execute the DIMER tutorial pair through real IPython kernels and record release evidence.
+"""Execute the DIMER E2E tutorial through a real IPython kernel and record release evidence.
 
-Runs `tabpfn_classifier_colab.ipynb` (E2E) in one fresh kernel, then
-`tabpfn_classifier_artifact_inference_colab.ipynb` (ARTIFACT-INFERENCE) in a second fresh kernel whose
-artifact bundle and new-data CSV come from the first run and a separately generated file — the
-same external-artifact boundary an interactive Colab user crosses with the upload dialog.
+Runs `tabpfn_classifier_colab.ipynb` (E2E) in one fresh kernel. NOTEBOOK_SPEC 3.0 retired the separate
+ARTIFACT-INFERENCE companion: its external-artifact boundary is now the notebook's own closing section (Section 10),
+which loads the pinned sample artifact, so no second notebook is run.
 
 Disclosed substitutions, recorded in the evidence JSON:
 1. `/content/...` paths are rewritten to `<work>/content/...`.
@@ -43,7 +42,6 @@ from validate_colab_tutorial import strip_bootstrap  # noqa: E402  (shared --ski
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / "tutorials/tabpfn_classifier_colab.ipynb"
-INFERENCE = ROOT / "tutorials/tabpfn_classifier_artifact_inference_colab.ipynb"
 SHIM = textwrap.dedent(
     '''
     import os
@@ -134,18 +132,6 @@ def _parse_overrides(items: list[str]) -> dict[str, str]:
     return overrides
 
 
-def make_genuinely_new_rows(path: Path, feature_columns: list[str], reference_csv: Path) -> pd.DataFrame:
-    ref = pd.read_csv(reference_csv)
-    numeric = ref[feature_columns].select_dtypes(include=np.number)
-    fresh = ref[feature_columns].head(8).copy()
-    for c in numeric.columns:
-        fresh[c] = numeric[c].mean() + np.linspace(-0.37, 0.37, len(fresh)) * numeric[c].std()
-    if fresh.equals(ref[feature_columns].head(8)):
-        raise RuntimeError("fresh rows must differ from the producer sample")
-    fresh.to_csv(path, index=False)
-    return fresh
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--work", type=Path, default=Path("/content"))
@@ -177,30 +163,12 @@ def main() -> int:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     metrics = json.loads((content / "tabpfn-tutorial-output" / "tabpfn_classification_metrics.json").read_text(encoding="utf-8"))
 
-    import zipfile
-    zips = sorted((content / "dimer" / "dataset").glob("*.zip"))
-    with zipfile.ZipFile(zips[0]) as z:
-        member = next(n for n in z.namelist() if n.endswith("test.csv"))
-        reference = work / "reference_test.csv"; reference.write_bytes(z.read(member))
-    fresh_rows = work / "tabpfn_classifier_release_fresh_rows.csv"
-    fresh = make_genuinely_new_rows(fresh_rows, manifest["featureColumns"], reference)
-    env["DIMER_UPLOAD_FILES"] = f"{manifest_path}|{art / manifest['fittedEstimator']}|{art / manifest['foundationCheckpoint']};{fresh_rows}"
-    inference_executed = work / "tabpfn_classifier_artifact_inference_colab.executed.ipynb"
-    _execute(_prepare(INFERENCE, work, args.skip_bootstrap, {}), inference_executed, content, env, args.timeout)
-
-    predictions = content / "tabpfn-artifact-inference-output" / "tabpfn_classification_predictions.csv"
-    if not predictions.exists():
-        raise RuntimeError("Artifact-inference notebook did not write the predictions CSV")
-    result = pd.read_csv(predictions)
-    if len(result) != len(fresh) or "prediction" not in result.columns:
-        raise RuntimeError("Artifact-inference prediction output contract failed")
-
     import importlib.metadata as md
     import torch
     evidence = {
         "result": "PASS", "recordedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "repositoryCommit": commit, "workingTreeDirty": bool(dirty), "worker": {"repository": ft_repo, "commit": ft_commit, "source": args.finetuner_source},
-        "notebooks": {"e2e": MAIN.name, "artifactInference": INFERENCE.name},
+        "notebooks": {"e2e": MAIN.name},
         "engine": "nbclient / IPython kernel, one fresh kernel per notebook",
         "environment": {"host": platform.node(), "os": platform.platform(), "python": platform.python_version(), "torch": torch.__version__,
                         "tabpfn": md.version("tabpfn"), "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None},
@@ -208,7 +176,6 @@ def main() -> int:
                           "tutorialRef": commit, "uploadShim": "google.colab.files.upload() served from DIMER_UPLOAD_FILES"},
         "notColab": "Clean local-kernel execution, not a Google Colab run; a Colab record is still required for a Colab claim.",
         "e2e": {"executedNotebook": str(main_executed), "metrics": metrics},
-        "artifactInference": {"executedNotebook": str(inference_executed), "externalArtifact": str(manifest_path), "freshRows": str(fresh_rows), "rowsScored": int(len(result))},
     }
     evidence_path = args.evidence or (work / "release-evidence.json")
     evidence_path.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")

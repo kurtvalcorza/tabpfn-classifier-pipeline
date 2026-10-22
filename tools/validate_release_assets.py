@@ -1,7 +1,8 @@
 """Static release-asset validation for the TabPFN-3 classifier DIMER pipeline.
 
-Checks the two STANDALONE tutorial notebooks (DIMER Notebook Specification 2.0 §4) — the `E2E`
-tutorial and its `ARTIFACT-INFERENCE` companion — the tutorial registry, model card, README, STATUS.md
+Checks the STANDALONE `E2E` tutorial notebook (DIMER Notebook Specification 3.0 §4), including its closing
+external-artifact section (§19.1, which replaced the retired `ARTIFACT-INFERENCE` companion) — the tutorial registry,
+model card, README, STATUS.md
 and weight documentation for source conformance and cross-document identity consistency, and runs the
 generator parity checks (PAR1–PAR3) for every notebook.
 
@@ -82,8 +83,8 @@ NOTEBOOKS = {
     "tabpfn_classifier_colab.ipynb": {
         "template": "notebook_template",
         "profile": "E2E",
-        "byod_gates": {"USE_BYOD": False, "BYOD_PATH": "", "USE_BYOD_ROWS": False, "NEW_DATA_PATH": "", "RUN_ACTIVITY": False},
-        "stages": ("weights", "data", "validate", "condition", "report", "export", "reload", "predict", "activity"),
+        "byod_gates": {"USE_BYOD": False, "BYOD_PATH": "", "USE_BYOD_ROWS": False, "NEW_DATA_PATH": "", "RUN_ACTIVITY": False, "ARTIFACT_SOURCE": "Pinned sample artifact", "ARTIFACT_ZIP_PATH": "", "EXPECTED_ZIP_SHA256": "", "USE_OWN_ROWS": False, "EXTERNAL_ROWS_PATH": ""},
+        "stages": ("weights", "data", "validate", "condition", "report", "export", "reload", "predict", "activity", "external_artifact", "external_reconstruct", "external_predict"),
         "expected_outputs": (
             "{STEM}_input_manifest.json",
             "{STEM}_evaluation_report.json",
@@ -119,6 +120,21 @@ NOTEBOOKS = {
             '"model_revision": P.MODEL_REVISION',
             '"model_license": P.MODEL_LICENSE',
             'importlib.metadata.version("tabpfn")',
+            "Trusted digests of this export",
+            'SAMPLE_ARTIFACT_URL = "https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/sample-artifact-synthetic-v1/tabpfn_classifier_artifact.zip"',
+            'SAMPLE_ARTIFACT_SHA256 = "',
+            'SAMPLE_ARTIFACT_FITTED_SHA256 = "',
+            'EXTERNAL_DIR = "external_artifact"',
+            'zip_path = fetch_pinned_artifact(run.root / "inputs" / "external_artifact.zip", SAMPLE_ARTIFACT_URL, SAMPLE_ARTIFACT_SHA256)',
+            'check_trusted_digest(part, expected, "the pinned SAMPLE_ARTIFACT_SHA256")',
+            "members = check_members(P, zip_path)",
+            "P.safe_extract_zip(zip_path, bundle)",
+            "artifact = P.validate_artifact_bundle(bundle, expected_fitted_sha256=expected_fitted, expected_checkpoint_sha256=P.WEIGHTS_SHA256)",
+            "binding = check_base_model(P, manifest)",
+            "check_data_contract(manifest, contract)",
+            'serving = P.TabPFNClassifierPipeline.from_artifact(Path(art["bundle"])',
+            'out.to_csv(target_dir / f"{STEM}_external_predictions.csv", index=False)',
+            'run.write_output(f"{EXTERNAL_DIR}/{STEM}_external_result.json", payload)',
         ),
         "kernel_markers": (
             "USE_BYOD = False  # @param",
@@ -140,8 +156,19 @@ NOTEBOOKS = {
             "run_stage('reload')",
             "run_stage('predict'",
             "run_stage('activity'",
+            "ARTIFACT_SOURCE = 'Pinned sample artifact'  # @param",
+            "USE_OWN_ROWS = False  # @param",
+            "run_stage('external_artifact', source='pinned')",
+            "run_stage('external_reconstruct')",
+            "run_stage('external_predict'",
         ),
         "markdown_markers": (
+            "## 10. Using an artifact made elsewhere",
+            "**This section needs only the setup cells (Sections 1–3).**",
+            "**Trust boundary.**",
+            "the reload shows that this run's export survives serialization, and this section shows that an artifact made elsewhere can be validated and served here",
+            "outputs/external_artifact/",
+            "**Notebook kind:** `TUTORIAL`",
             "**Capability:** supervised tabular classification by **in-context learning**",
             "**no gradient update**",
             "**not calibrated probabilities**",
@@ -155,69 +182,6 @@ NOTEBOOKS = {
         ),
         "forbidden_runner": (),
     },
-    "tabpfn_classifier_artifact_inference_colab.ipynb": {
-        "template": "notebook_template_artifact_inference",
-        "profile": "ARTIFACT-INFERENCE",
-        "byod_gates": {"ARTIFACT_ZIP_PATH": "", "UPLOAD_ARTIFACT": False, "EXPECTED_ZIP_SHA256": "", "EXPECTED_FITTED_SHA256": "", "NEW_DATA_PATH": "", "UPLOAD_NEW_DATA": False, "RUN_ACTIVITY": False},
-        "stages": ("weights", "artifact", "reconstruct", "rows", "predict", "activity"),
-        "expected_outputs": (
-            "{STEM}_input_manifest.json",
-            "{STEM}_evaluation_report.json",
-            "{STEM}_result.json",
-            "{STEM}_predictions.csv",
-        ),
-        "runner_markers": (
-            'STEM = "tabpfn_classifier_artifact_inference"',
-            'zip_sha = check_trusted_digest(zip_path, opts.get("expected_zip_sha256", ""), "EXPECTED_ZIP_SHA256")',
-            "members = check_members(P, zip_path)",
-            "Trusted digest mismatch",
-            "P.safe_extract_zip(zip_path, bundle)",
-            "artifact = P.validate_artifact_bundle(bundle, expected_fitted_sha256=expected_fitted, expected_checkpoint_sha256=P.WEIGHTS_SHA256)",
-            "the bundled model.ckpt is not the pinned TabPFN-3 checkpoint carried by this notebook",
-            "fresh = P.TabPFNClassifierPipeline.from_artifact(Path(art[\"bundle\"]), device=device, expected_checkpoint_sha256=P.WEIGHTS_SHA256)",
-            "frame = P.validate_new_rows(raw.drop(columns=id_columns), features, target_column=target, classes=classes)",
-            "frame = check_numeric_features(path.name, frame, feature_kinds(art, frame))",
-            "P.validate_new_rows(frame.assign(unexpected_column=0), features, target_column=target, classes=classes)",
-            "report = P.evaluation_report(None, n_validation=0, class_labels=fresh.classes, sample_kind=rows_state[\"sample_kind\"])",
-            "fetched = fetch_sample(run, opts.get(\"sample\") or {})",
-            "Sample bundle verification failed before extraction",
-            "SAMPLE_URL_PREFIX = \"https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/\"",
-            '"model_revision": P.MODEL_REVISION',
-            '"model_license": P.MODEL_LICENSE',
-        ),
-        "kernel_markers": (
-            "ARTIFACT_ZIP_PATH = ''  # @param",
-            "UPLOAD_ARTIFACT = False  # @param",
-            "EXPECTED_ZIP_SHA256 = ''  # @param",
-            "EXPECTED_FITTED_SHA256 = ''  # @param",
-            "NEW_DATA_PATH = ''  # @param",
-            "UPLOAD_NEW_DATA = False  # @param",
-            "ID_COLUMNS = []  # @param",
-            "from google.colab import files",
-            "files.upload()",
-            "run_stage('artifact'",
-            "run_stage('reconstruct')",
-            "run_stage('rows'",
-            "run_stage('predict')",
-        ),
-        "markdown_markers": (
-            "**Capability:** serving-state reconstruction from an externally produced TabPFN-3 classifier bundle",
-            "produced **outside this execution**",
-            "**No artifact is created here**",
-            "**Trust boundary.**",
-            "EXPECTED_FITTED_SHA256",
-            "verdict is `not-measurable`",
-            "artifact creation, in-notebook fitting, fine-tuning, regression, calibrated probabilities",
-        ),
-        "forbidden_runner": (
-            "build_synthetic_dataset(",
-            "stratified_holdout(",
-            "majority_class_baseline(",
-            "save_artifact(",
-            "zip_artifact_bundle(",
-            ".fit(",
-        ),
-    },
 }
 
 # ---------------------------------------------------------------------------
@@ -226,7 +190,7 @@ NOTEBOOKS = {
 # Specification 2.0; see docs/release-verification.md for the release gate.
 # ---------------------------------------------------------------------------
 
-NOTEBOOK_SPEC = "2.2"
+NOTEBOOK_SPEC = "3.0"
 ALLOWED_PROFILES = {"E2E", "ARTIFACT-INFERENCE", "TASK-INFERENCE", "MULTI-CAPABILITY", "SMOKE"}
 STATUS_TOKENS = ("Candidate", "Release-grade")
 PLACEHOLDER = re.compile(r"\b(TODO|TBD|FIXME)\b|Insert text here|Tooltip:", re.I)
@@ -300,15 +264,11 @@ ISOLATION_MARKERS = (
     "for name in ('PYTHONPATH', 'PYTHONHOME', 'PYTHONSTARTUP'",
     "def run_stage(stage, **options):",
 )
-ST1_PATTERN = re.compile(
-    r"\bgit\b[^\n]*\bclone\b|github\.com/kurtvalcorza(?!/tabpfn-classifier-pipeline/releases/download/(?:sample-bundle-v\d+/[A-Za-z0-9_.-]+\.zip)?['\"])"
-)
 # Patterns that must never appear in tutorial code (comment-stripped), in any kernel cell or the stage runner.
 FORBIDDEN_PATTERNS = (
     ("credential in clone URL", re.compile(r"https://[^/'\"\s]*@github\.com/|x-access-token:")),
-    # The one allowed repository URL is a release-asset download of this repository (the pinned sample bundle, SART6;
-    # REL3: a pinned, SHA-256-verified release asset is not a repository clone or source fetch).
-    ("repository clone (ST1)", ST1_PATTERN),
+    # github.com/kurtvalcorza references are checked by disallowed_own_references (ST1): only the exact pinned asset URL.
+    ("repository clone (ST1)", re.compile(r"\bgit\b[^\n]*\bclone\b")),
     ("mutable git dependency (MOD14)", re.compile(r"git\+https?://(?![^\n]*@[0-9a-f]{40}\b)")),
     ("editable self-install", re.compile(r"""['"](?:-e|--editable)['"]|pip install (?:-e|--editable)\b""")),
     ("mutable model reference (MOD14)", re.compile(r"revision\s*=\s*['\"](?:main|latest)['\"]")),
@@ -322,6 +282,31 @@ FORBIDDEN_PATTERNS = (
 )
 # In-kernel installs (TDC-M1): no pip into the notebook kernel, and no restart instruction anywhere.
 KERNEL_INSTALL = re.compile(r"['\"]-m['\"]\s*,\s*['\"]pip['\"]|^\s*[%!]\s*pip\b|['\"]pip install\b|\bpip\.main\(", re.M)
+
+
+# ST1 / SART6: the only github.com/kurtvalcorza reference allowed anywhere in tutorial code is the exact pinned sample-artifact
+# URL of the external-artifact section, in the stage runner only. It is built here from the tag and compared whole: no prefix
+# match, and a reference holding "..", "%2e" (any case), "?" or "#" is refused even before the comparison.
+SAMPLE_ARTIFACT_TAG = "sample-artifact-synthetic-v1"
+PINNED_SAMPLE_ARTIFACT_URL = f"https://github.com/kurtvalcorza/{REPO_NAME}/releases/download/{SAMPLE_ARTIFACT_TAG}/tabpfn_classifier_artifact.zip"
+_OWN_REFERENCE = re.compile(r"github\.com/kurtvalcorza", re.I)
+_REFERENCE_STOP = set(" \t\r\n'\"`<>()[]{},;\\")
+
+
+def disallowed_own_references(text: str, allowed: tuple[str, ...] = ()) -> list[str]:
+    """Every github.com/kurtvalcorza reference in ``text`` that is not exactly one of ``allowed`` (whole token)."""
+    bad = []
+    for match in _OWN_REFERENCE.finditer(text):
+        start, end = match.start(), match.end()
+        while start > 0 and text[start - 1] not in _REFERENCE_STOP:
+            start -= 1
+        while end < len(text) and text[end] not in _REFERENCE_STOP:
+            end += 1
+        reference = text[start:end]
+        traversal = ".." in reference or "%2e" in reference.lower() or "?" in reference or "#" in reference
+        if traversal or reference not in allowed:
+            bad.append(reference)
+    return bad
 
 
 class ValidationError(AssertionError):
@@ -702,6 +687,9 @@ def _validate_notebook_content(path: Path, code_cells: list[tuple[int, str, ast.
         _check('f"' + name in runner_code, f"{path.name}: stage runner must export {name.format(STEM=stem)}")
     present = [label for label, pattern in FORBIDDEN_PATTERNS if pattern.search(kernel) or pattern.search(runner_code)]
     _check(not present, f"{path.name}: forbidden/insecure source: {present}")
+    bad_refs = disallowed_own_references(kernel) + disallowed_own_references(runner_code, (PINNED_SAMPLE_ARTIFACT_URL,))
+    _check(not bad_refs, f"{path.name}: repository reference other than the exact pinned sample-artifact URL (ST1): {bad_refs}")
+    _check(dimer_kind(path) == "TUTORIAL", f"{path.name}: metadata.dimer.notebook_kind must be TUTORIAL (KND1; DEMO is retired in 3.0)")
     leaked = [m for m in FORBIDDEN_OUTSIDE_MODULE if m in kernel]
     _check(not leaked, f"{path.name}: direct library use in the notebook's own cells (G2): {leaked}")
     _check(revision not in kernel, f"{path.name}: the model revision may appear only in the carried files")
@@ -716,6 +704,10 @@ def _validate_notebook_content(path: Path, code_cells: list[tuple[int, str, ast.
     _check(f"**Profile:** `{spec['profile']}`" in markdown, f"{path.name}: markdown must state the profile")
     ref = template.get("model_host", {}).get("reference_url", f"https://huggingface.co/{model_id}")
     _check(ref in markdown, f"{path.name}: references must link {ref}")
+
+
+def dimer_kind(path: Path) -> str | None:
+    return json.loads(_read(path)).get("metadata", {}).get("dimer", {}).get("notebook_kind")
 
 
 def validate_notebooks() -> None:

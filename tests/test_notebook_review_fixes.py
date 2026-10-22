@@ -1,4 +1,7 @@
-"""Regression tests for the 2026-10-05 notebook review (TPC-M1..M2, TPC-m1..m4; TPCA-M1..M3, TPCA-m1..m2).
+"""Regression tests for the 2026-10-05 notebook review (TPC-M1..M2, TPC-m1..m4) of the E2E notebook.
+
+The companion's findings (TPCA-*) moved with its consumer logic into the external-artifact section and are tested in
+`tests/test_external_artifact_section.py` (NOTEBOOK_SPEC 3.0 retired the companion notebook).
 
 They need only CI's dependencies (no torch, no tabpfn, no checkpoint, no Parquet engine): they exec the notebooks' own
 kernel cells with stand-ins for `run_stage` and `google.colab`, run the stage runners' model-free parts (`data`,
@@ -28,7 +31,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
 E2E = ROOT / "tutorials" / "tabpfn_classifier_colab.ipynb"
-AI = ROOT / "tutorials" / "tabpfn_classifier_artifact_inference_colab.ipynb"
 
 
 def _load(name: str, path: Path):
@@ -40,7 +42,6 @@ def _load(name: str, path: Path):
 
 
 STAGES = _load("tpc_tutorial_stages", TOOLS / "tutorial_stages.py")
-AI_STAGES = _load("tpc_tutorial_stages_ai", TOOLS / "tutorial_stages_artifact_inference.py")
 
 
 def _nb(path: Path) -> dict:
@@ -127,10 +128,10 @@ def _zip(path: Path, frames: dict[str, pd.DataFrame]) -> Path:
     return path
 
 
-# ---------------------------------------------------------------- TPC-M1 / TPCA-M2: isolated runtime
+# ---------------------------------------------------------------- TPC-M1: isolated runtime
 
 
-@pytest.mark.parametrize("path", [E2E, AI], ids=["TPC-M1", "TPCA-M2"])
+@pytest.mark.parametrize("path", [E2E], ids=["TPC-M1"])
 def test_m1_no_kernel_install_and_no_restart_instruction(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     assert "Restart the runtime" not in text and "restart the runtime" not in text.replace("no runtime restart", "")
@@ -152,7 +153,7 @@ def _exec_check_cell(ns: dict, path: Path, **overrides) -> None:
         exec(compile(src, "<check>", "exec"), ns)
 
 
-@pytest.mark.parametrize("path", [E2E, AI], ids=["TPC-M1", "TPCA-M2"])
+@pytest.mark.parametrize("path", [E2E], ids=["TPC-M1"])
 def test_m1_section1_is_idempotent(path: Path, tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     ns: dict = {}
@@ -205,7 +206,7 @@ def test_m1_second_run_all_reuses_the_matching_environment(tmp_path, monkeypatch
 GUIDED = ("## How to use this notebook", "**Who this notebook is for.**", "## The task: Input → Model → Output", "## Roadmap", "<summary><strong>Glossary</strong>", "Predict before running", "**What to notice:**", "Check your reasoning", "## Troubleshooting", "## Conclusion")
 
 
-@pytest.mark.parametrize("path", [E2E, AI], ids=["TPC-M2", "TPCA-M3"])
+@pytest.mark.parametrize("path", [E2E], ids=["TPC-M2"])
 def test_m2_guided_layer_and_collapsed_infrastructure(path: Path) -> None:
     nb = _nb(path)
     md = "\n".join(_src(c) for c in nb["cells"] if c["cell_type"] == "markdown")
@@ -218,15 +219,14 @@ def test_m2_guided_layer_and_collapsed_infrastructure(path: Path) -> None:
 
 
 def test_M2_n_estimators_activity_and_tamper_activity() -> None:
-    """TPC-M2 / TPCA-M3: the N_ESTIMATORS field becomes a guided activity; the tampered-bundle experiment is the companion's."""
+    """TPC-M2 / TPCA-M3: the N_ESTIMATORS field becomes a guided activity; its outputs stay under outputs/activity/."""
     assert "ACTIVITY_N_ESTIMATORS = 1  # @param" in _cell_with(E2E, "RUN_ACTIVITY = False  # @param")
-    assert "TAMPER = 'flip one byte of model.tabpfn_fit'  # @param" in _cell_with(AI, "RUN_ACTIVITY = False  # @param")
     source = (TOOLS / "tutorial_stages.py").read_text(encoding="utf-8")
     body = source[source.index("def stage_activity"):source.index("STAGES = {")]
     assert 'write_output(f"activity/' in body and "!= before" in body
 
 
-@pytest.mark.parametrize("runner", ["tutorial_stages.py", "tutorial_stages_artifact_inference.py"])
+@pytest.mark.parametrize("runner", ["tutorial_stages.py"])
 def test_no_quality_assert_in_stage_runners(runner: str) -> None:
     assert not [n for n in ast.walk(ast.parse((TOOLS / runner).read_text(encoding="utf-8"))) if isinstance(n, ast.Assert)]
 
@@ -347,162 +347,15 @@ def test_S2_logistic_regression_reference(tmp_path) -> None:
     assert (round(ref["test"]["accuracy"], 4), ref["test"]["errors"]) == (0.9444, 5)
 
 
-# ---------------------------------------------------------------- TPCA-M1: no sample yet — stop cleanly; builder ready
+# ---------------------------------------------------------------- carried stage processes
 
 
-PIN = json.loads((ROOT / "examples" / "sample_bundle_pin.json").read_text(encoding="utf-8"))
-
-
-def test_M1_default_path_uses_the_pinned_release_asset_and_opens_no_dialog(tmp_path, monkeypatch) -> None:
-    """TPCA-M1 / SART6: with every field empty, Section 4 passes the pinned sample (a release asset of this repository,
-    pinned by URL, size and SHA-256) to the artifact stage and opens no upload dialog; the pin names its producer (SART8)."""
-    _no_colab(monkeypatch)
-    ns, calls = _kernel(tmp_path)
-    exec(compile(_cell_with(AI, "ARTIFACT_ZIP_PATH = ''  # @param"), "<s4>", "exec"), ns)
-    assert calls == [("artifact", {"source": "sample", "zip_path": "", "expected_zip_sha256": "", "expected_fitted_sha256": "", "sample": PIN})]
-    assert PIN["url"] == f"https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/{PIN['tag']}/tabpfn_classifier_sample_bundle.zip"
-    assert PIN["tag"] == "sample-bundle-v1" and re.fullmatch(r"[0-9a-f]{64}", PIN["sha256"]) and PIN["sha256"] != "0" * 64 and PIN["bytes"] > 1000
-    for key in ("notebook", "notebook_blob", "commit", "run"):
-        assert PIN["producer"].get(key), key
-    assert ns["SAMPLE_ARTIFACT"] == PIN
-
-
-class _Served:
-    """A stand-in for urllib.request.urlopen that serves fixed bytes and counts calls."""
-
-    def __init__(self, data: bytes) -> None:
-        self.data, self.calls = data, 0
-
-    def __call__(self, url, timeout=0):
-        self.calls += 1
-        return contextlib.closing(types.SimpleNamespace(read=lambda n=-1: self.data[: n if n >= 0 else None], close=lambda: None))
-
-
-def _sample_asset(tmp_path: Path) -> tuple[Path, dict, object]:
-    builder = _load("tpc_build_sample_bundle_asset", TOOLS / "build_sample_bundle.py")
-    P = AI_STAGES.package(_run(tmp_path / "r0", tmp_path / "o0", module=AI_STAGES).root)
-    rows = tmp_path / "rows.csv"
-    rows.write_text("record_id,a\nr1,1.0\n")
-    pin = builder.build(_fake_bundle(tmp_path, P), rows, {"notebook": "t"}, tmp_path / "dist")
-    return tmp_path / "dist" / builder.ASSET, pin, builder
-
-
-def test_M1_sample_is_verified_before_extraction_and_reused(tmp_path) -> None:
-    """SART6: the stage refuses a download whose size or SHA-256 differs from the pin before anything is extracted, refuses a
-    non-release URL and an unexpected member list, extracts a verified asset, and reuses a verified copy without downloading."""
-    asset, pin, _builder = _sample_asset(tmp_path)
-    data = asset.read_bytes()
-    run = _run(tmp_path / "run", tmp_path / "outputs", module=AI_STAGES)
-    tampered = bytearray(data)
-    tampered[len(tampered) // 2] ^= 0xFF
-    with pytest.raises(ValueError, match="verification failed before extraction"):
-        _quiet(AI_STAGES.fetch_sample, run, pin, _Served(bytes(tampered)))
-    assert not (run.root / AI_STAGES.SAMPLE_DIR).exists()
-    with pytest.raises(ValueError, match="release asset of this repository"):
-        _quiet(AI_STAGES.fetch_sample, run, {**pin, "url": "https://example.org/releases/download/sample-bundle-v1/x.zip"}, _Served(data))
-    served = _Served(data)
-    _quiet(AI_STAGES.fetch_sample, run, pin, served)
-    assert served.calls == 1
-    assert sorted(p.name for p in (run.root / AI_STAGES.SAMPLE_DIR).iterdir()) == sorted(AI_STAGES.SAMPLE_MEMBERS)
-    again = _Served(b"")
-    _quiet(AI_STAGES.fetch_sample, run, pin, again)
-    assert again.calls == 0
-    extra = tmp_path / "extra.zip"
-    with zipfile.ZipFile(asset) as src, zipfile.ZipFile(extra, "w") as dst:
-        for name in src.namelist():
-            dst.writestr(name, src.read(name))
-        dst.writestr("notes.txt", "an extra member")
-    extra_pin = {**pin, "url": pin["url"].replace(".zip", "-extra.zip"), "bytes": extra.stat().st_size, "sha256": hashlib.sha256(extra.read_bytes()).hexdigest()}
-    with pytest.raises(ValueError, match="must hold exactly"):
-        _quiet(AI_STAGES.fetch_sample, run, extra_pin, _Served(extra.read_bytes()))
-
-
-def test_M1_stage_artifact_assembles_the_verified_sample_with_the_checkpoint(tmp_path, monkeypatch) -> None:
-    """The default path end to end up to validate_artifact_bundle: download (stand-in), verify, extract, check against
-    SAMPLE_BUNDLE.json, hard-link the verified checkpoint as model.ckpt, then validate with the trusted fitted digest."""
-    asset, pin, _builder = _sample_asset(tmp_path)
-    run = _run(tmp_path / "run", tmp_path / "outputs", {"source": "sample", "sample": pin}, module=AI_STAGES)
-    checkpoint = tmp_path / "ckpt.bin"
-    checkpoint.write_bytes(b"c" * 4096)
-    run.write_state("weights.json", {"checkpoint": str(checkpoint)})
-    served = _Served(asset.read_bytes())
-    monkeypatch.setattr(AI_STAGES.urllib.request, "urlopen", served)
-    seen = {}
-
-    def fake_validate(bundle, expected_fitted_sha256="", expected_checkpoint_sha256=""):
-        seen.update(members=sorted(p.name for p in Path(bundle).iterdir()), fitted=expected_fitted_sha256)
-        manifest = json.loads((Path(bundle) / "artifact_manifest.json").read_text())
-        return {**manifest, "verifiedSha256": {"fittedEstimator": expected_fitted_sha256, "foundationCheckpoint": expected_checkpoint_sha256}}
-
-    P = AI_STAGES.package(run.root)
-    monkeypatch.setattr(P, "validate_artifact_bundle", fake_validate)
-    _quiet(AI_STAGES.stage_artifact, run)
-    record = run.read_state("artifact.json", "test")
-    assert served.calls == 1 and record["zip_sha256"] == pin["sha256"] and record["source"] == "sample"
-    assert seen["members"] == sorted([P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, P.CHECKPOINT_NAME])
-    with zipfile.ZipFile(asset) as archive:
-        assert seen["fitted"] == json.loads(archive.read("SAMPLE_BUNDLE.json"))["files"]["model.tabpfn_fit"]["sha256"]
-    assert "before extraction" in record["trusted_digest"]
-
-
-def _fake_bundle(tmp_path: Path, P) -> Path:
-    art = tmp_path / "art"
-    art.mkdir()
-    with zipfile.ZipFile(art / P.FITTED_NAME, "w") as fitted:
-        fitted.writestr("init_params.json", json.dumps({"model_path": "x"}))
-        fitted.writestr("fitted_attrs.joblib", b"\0" * 2048)
-    (art / P.CHECKPOINT_NAME).write_bytes(b"c" * 4096)
-    manifest = {"schemaVersion": 1, "taskType": P.TASK_TYPE, "targetColumn": "target", "featureColumns": ["a"], "classes": ["x", "y"], "fittedEstimator": P.FITTED_NAME, "foundationCheckpoint": P.CHECKPOINT_NAME, "fittedEstimatorSha256": hashlib.sha256((art / P.FITTED_NAME).read_bytes()).hexdigest(), "foundationCheckpointSha256": P.WEIGHTS_SHA256}
-    (art / P.ARTIFACT_MANIFEST_NAME).write_text(json.dumps(manifest))
-    zip_path = tmp_path / "bundle.zip"
-    with zipfile.ZipFile(zip_path, "w") as archive:
-        for name in (P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, P.CHECKPOINT_NAME):
-            archive.write(art / name, arcname=name)
-    return zip_path
-
-
-def test_M1_sample_builder_writes_a_reproducible_asset_without_the_checkpoint(tmp_path) -> None:
-    """TPCA-M1: tools/build_sample_bundle.py turns a recorded E2E export into the release asset (no model.ckpt), byte for
-    byte reproducible, and --verify refuses any other file."""
-    asset, pin, builder = _sample_asset(tmp_path)
-    with zipfile.ZipFile(asset) as archive:
-        assert sorted(archive.namelist()) == sorted(builder.MEMBERS)
-        record = json.loads(archive.read("SAMPLE_BUNDLE.json"))
-    assert "model.ckpt" not in builder.MEMBERS and record["checkpoint"]["sha256"] == AI_STAGES.package(tmp_path / "r0").WEIGHTS_SHA256
-    assert pin["sha256"] == hashlib.sha256(asset.read_bytes()).hexdigest() and pin["bytes"] == asset.stat().st_size
-    again = builder.build(tmp_path / "bundle.zip", tmp_path / "rows.csv", {"notebook": "t"}, tmp_path / "dist2")
-    assert again["sha256"] == pin["sha256"]
-    pin_file = tmp_path / "pin.json"
-    pin_file.write_text(json.dumps(pin))
-    assert _quiet(builder.verify, asset, pin_file) == 0
-    asset.write_bytes(asset.read_bytes() + b"x")
-    with contextlib.redirect_stderr(io.StringIO()):
-        assert builder.verify(asset, pin_file) == 1
-
-
-def test_st1_allows_only_this_repositorys_release_asset_url() -> None:
-    """REL3 / SART6: the validator's repository-clone rule (ST1) admits the pinned release-asset URL of this repository and
-    nothing else from github.com/kurtvalcorza."""
-    validator = _load("tpc_validate_release_assets", TOOLS / "validate_release_assets.py")
-    allowed = [f"'{PIN['url']}'", "'https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/'"]
-    refused = [
-        "'https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/archive/refs/heads/main.zip'",
-        "'https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/sample-bundle-v1/x.tar.gz'",
-        "'https://github.com/kurtvalcorza/mitra-classifier-pipeline/releases/download/sample-bundle-v1/x.zip'",
-        "'https://github.com/kurtvalcorza/tabpfn-classifier-pipeline.git'",
-        "git clone https://example.org/x",
-    ]
-    assert not [u for u in allowed if validator.ST1_PATTERN.search(u)]
-    assert all(validator.ST1_PATTERN.search(u) for u in refused)
-
-
-@pytest.mark.parametrize("template", ["notebook_template.py", "notebook_template_artifact_inference.py"])
-def test_stage_processes_import_neither_ipython_nor_google_colab(template: str) -> None:
+def test_stage_processes_import_neither_ipython_nor_google_colab() -> None:
     """Stages run in the isolated environment, which has neither IPython nor google.colab: only kernel cells may use them
     (the upload dialogs). There is no worker and no google.colab stub that would need a ModuleSpec (ENV15); a carried
     module importing either would fail on Colab (swin2sr-x4-super-resolution-pipeline 34eac6c / tirex 9ee5922 pattern)."""
-    build = _load(f"tpc_build_notebook_{template[:-3]}", TOOLS / "build_notebook.py")
-    tpl = _load(f"tpc_{template[:-3]}", TOOLS / template).TEMPLATE
+    build = _load("tpc_build_notebook", TOOLS / "build_notebook.py")
+    tpl = _load("tpc_notebook_template", TOOLS / "notebook_template.py").TEMPLATE
     carried = [ROOT / source for dest, source in build.carried_sources(ROOT, tpl).items() if dest.endswith(".py")]
     assert {p.name for p in carried} >= {"pipeline.py", Path(tpl["stage_runner"]).name}
     offenders = [str(p) for p in carried if re.search(r"^\s*(from|import)\s+(IPython|google)\b", p.read_text(encoding="utf-8"), re.M)]
@@ -510,104 +363,3 @@ def test_stage_processes_import_neither_ipython_nor_google_colab(template: str) 
     text = (ROOT / "tutorials" / tpl["notebook_name"]).read_text(encoding="utf-8")
     assert "sys.modules['google" not in text and 'sys.modules[\\"google' not in text and "_WORKER_SOURCE" not in text
     assert "IPython" not in text
-
-
-# ---------------------------------------------------------------- TPCA-m2: members and digests
-
-
-def test_m2_unlisted_and_nested_members_are_refused(tmp_path) -> None:
-    """TPCA-m2: a bundle with notes.txt, or with sub/model.ckpt that flattening would let overwrite model.ckpt, is refused."""
-    P = AI_STAGES.package(_run(tmp_path / "r", tmp_path / "o", module=AI_STAGES).root)
-    good = _fake_bundle(tmp_path, P)
-    assert AI_STAGES.check_members(P, good) == sorted([P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, P.CHECKPOINT_NAME])
-    extra = tmp_path / "extra.zip"
-    shutil.copyfile(good, extra)
-    with zipfile.ZipFile(extra, "a") as archive:
-        archive.writestr("notes.txt", "x")
-    with pytest.raises(ValueError, match=r"unexpected=\['notes\.txt'\]"):
-        AI_STAGES.check_members(P, extra)
-    nested = tmp_path / "nested.zip"
-    shutil.copyfile(good, nested)
-    with zipfile.ZipFile(nested, "a") as archive:
-        archive.writestr("sub/model.ckpt", b"evil")
-    with pytest.raises(ValueError, match=r"\['model\.ckpt'\] occur more than once"):
-        AI_STAGES.check_members(P, nested)
-
-
-def test_m2_trusted_digests_are_checked_and_malformed_ones_refused(tmp_path) -> None:
-    """TPCA-M1/m2 (trust): a ZIP whose SHA-256 differs from EXPECTED_ZIP_SHA256 is refused before anything is loaded."""
-    P = AI_STAGES.package(_run(tmp_path / "r", tmp_path / "o", module=AI_STAGES).root)
-    zip_path = _fake_bundle(tmp_path, P)
-    observed = hashlib.sha256(zip_path.read_bytes()).hexdigest()
-    with pytest.raises(ValueError, match=f"EXPECTED_ZIP_SHA256 is {'0' * 64}, the supplied file's SHA-256 is {observed}"):
-        AI_STAGES.check_trusted_digest(zip_path, "0" * 64, "EXPECTED_ZIP_SHA256")
-    with pytest.raises(ValueError, match="must be 64 hexadecimal characters"):
-        AI_STAGES.check_digest_format("abc", "EXPECTED_FITTED_SHA256")
-    assert AI_STAGES.check_trusted_digest(zip_path, observed.upper(), "EXPECTED_ZIP_SHA256") == observed
-
-
-# ---------------------------------------------------------------- TPCA-m1 / TPCA-m2: rows, identifiers, numeric types
-
-
-def _rows_run(tmp_path: Path, source: str, options: dict):
-    run = _run(tmp_path / "run", tmp_path / "outputs", options, module=AI_STAGES)
-    manifest = {"targetColumn": "target", "featureColumns": [f"feature_{i:02d}" for i in range(12)], "classes": ["class_0", "class_1", "class_2"], "featureKinds": {f"feature_{i:02d}": "numeric" for i in range(12)}}
-    run.write_state("artifact.json", {"source": source, "manifest": manifest})
-    return run
-
-
-def _new_rows(tmp_path: Path) -> pd.DataFrame:
-    frames = _synthetic(tmp_path)
-    return frames["test.csv"].drop(columns=["target"]).head(8)
-
-
-def test_m1_identifier_columns_are_kept_and_undeclared_ones_get_a_hint(tmp_path) -> None:
-    """TPCA-m1: declared ID_COLUMNS are excluded from the features and kept; an undeclared one is refused with a hint."""
-    path = tmp_path / "mine.csv"
-    _new_rows(tmp_path).to_csv(path, index=False)
-    run = _rows_run(tmp_path, "path", {"source": "path", "path": str(path), "id_columns": []})
-    with pytest.raises(ValueError, match=r"\[SCHEMA_MISMATCH\].*If \['category', 'record_id'\] are identifiers, list them in ID_COLUMNS"):
-        _quiet(AI_STAGES.stage_rows, run)
-    run.options["id_columns"] = ["record_id", "category"]
-    _quiet(AI_STAGES.stage_rows, run)
-    state = json.loads((run.state / "rows.json").read_text())
-    assert state["id_columns"] == ["record_id", "category"] and state["sample_kind"] == "BYOD"
-    assert list(pd.read_csv(run.state / "rows.csv").columns[:2]) == ["record_id", "category"]
-    run.options["id_columns"] = ["feature_00"]
-    with pytest.raises(ValueError, match="are fitted feature columns"):
-        _quiet(AI_STAGES.stage_rows, run)
-
-
-def test_m2_non_numeric_value_in_a_numeric_feature_is_refused(tmp_path) -> None:
-    """TPCA-m2: `abc` in feature_00 stops in the rows stage naming feature_00 and the value."""
-    rows = _new_rows(tmp_path).astype({"feature_00": object})
-    rows.loc[rows.index[0], "feature_00"] = "abc"
-    path = tmp_path / "abc.csv"
-    rows.to_csv(path, index=False)
-    run = _rows_run(tmp_path, "path", {"source": "path", "path": str(path), "id_columns": ["record_id", "category"]})
-    with pytest.raises(ValueError, match=r"abc\.csv: numeric feature 'feature_00' has 1 non-numeric value\(s\), e\.g\. \['abc'\]"):
-        _quiet(AI_STAGES.stage_rows, run)
-    del run  # without recorded feature kinds the majority-numeric rule still catches it
-    run = _rows_run(tmp_path / "b", "path", {"source": "path", "path": str(path), "id_columns": ["record_id", "category"]})
-    art = json.loads((run.state / "artifact.json").read_text())
-    art["manifest"].pop("featureKinds")
-    run.write_state("artifact.json", art)
-    with pytest.raises(ValueError, match="numeric feature 'feature_00'"):
-        _quiet(AI_STAGES.stage_rows, run)
-
-
-def test_m1_zip_by_path_with_rows_by_upload_has_no_name_error(tmp_path, monkeypatch) -> None:
-    """TPCA-m1 (review NameError class): ZIP by path, rows empty: outside Colab a message naming NEW_DATA_PATH; in Colab the dialog."""
-    artifact_cell = _set(_cell_with(AI, "ARTIFACT_ZIP_PATH = ''  # @param"), "ARTIFACT_ZIP_PATH", "/d/bundle.zip")
-    rows_cell = _cell_with(AI, "NEW_DATA_PATH = ''  # @param")
-    _no_colab(monkeypatch)
-    ns, calls = _kernel(tmp_path)
-    exec(compile(artifact_cell, "<s4>", "exec"), ns)
-    with pytest.raises(RuntimeError, match="set NEW_DATA_PATH"):
-        exec(compile(rows_cell, "<s6>", "exec"), ns)
-    monkeypatch.undo()
-    with _colab([{"rows.csv": b"a\n1\n"}]) as files:
-        ns, calls = _kernel(tmp_path)
-        exec(compile(artifact_cell, "<s4>", "exec"), ns)
-        exec(compile(rows_cell, "<s6>", "exec"), ns)
-        assert files.calls == 1 and calls[1][1]["source"] == "upload" and calls[1][1]["path"].endswith("inputs/rows.csv")

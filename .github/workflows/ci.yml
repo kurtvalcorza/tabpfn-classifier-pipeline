@@ -20,12 +20,10 @@ jobs:
         run: ruff check .
       - name: Offline tests (no tabpfn, no torch, no weights)
         run: PYTHONPATH=src pytest -q -m "not integration"
-      - name: Validate tutorials and model-card source (NOTEBOOK_SPEC 1.1 standalone)
+      - name: Validate tutorial and model-card source (NOTEBOOK_SPEC 3.0 standalone)
         run: python tools/validate_release_assets.py
       - name: Standalone notebook parity (PAR3)
-        run: |
-          python tools/build_notebook.py --check
-          python tools/build_notebook.py --check --template tools/notebook_template_artifact_inference.py
+        run: python tools/build_notebook.py --check
       - name: Validate component manifest
         run: |
           python - <<'PY'

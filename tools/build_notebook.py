@@ -26,7 +26,7 @@ per repository (identical across the six tabular in-context pipelines).
 Usage (from the repository root, or with --repo):
     python tools/build_notebook.py                      # write tutorials/<notebook_name>
     python tools/build_notebook.py --check              # exit 1 if the committed notebook differs (PAR3)
-    python tools/build_notebook.py --template tools/notebook_template_artifact_inference.py [--check]
+    python tools/build_notebook.py --template tools/notebook_template.py [--check]
     python tools/build_notebook.py --out PATH           # write elsewhere (review copies)
 """
 # ruff: noqa: E501  -- learner-facing prose and generated code are kept on single lines so they render readably
@@ -207,7 +207,7 @@ def carried_files(repo: Path, template: dict[str, Any], revision: str) -> tuple[
         "repository": f"kurtvalcorza/{template['repo_name']}",
         "revision": revision,
         "generator": GENERATOR_VERSION,
-        "notebook_spec": NOTEBOOK_SPEC,
+        "notebook_spec": template.get("notebook_spec", NOTEBOOK_SPEC),
         "files": {dest: sha256_text(text) for dest, text in files.items()} | {dest: sha256_bytes(base64.b64decode(b)) for dest, b in binary.items()},
         "sources": {**sources, **template.get("carried_binary", {})},
     }
@@ -533,8 +533,9 @@ def render(repo: Path, template: dict[str, Any], revision: str | None = None) ->
         f"# {template['title']}\n\n{badges}\n\n"
         f"**Profile:** `{template['profile']}`  \n"
         f"**Mode:** `{template['mode']}`  \n"
-        f"**Notebook specification:** DIMER Notebook Specification {NOTEBOOK_SPEC} — **standalone** (§4)  \n"
-        f"**Capability:** {template['capability']}\n\n"
+        f"**Notebook specification:** DIMER Notebook Specification {template.get('notebook_spec', NOTEBOOK_SPEC)} — **standalone** (§4)  \n"
+        + (f"**Notebook kind:** `{template['notebook_kind']}`  \n" if template.get("notebook_kind") else "")
+        +         f"**Capability:** {template['capability']}\n\n"
         f"**This notebook is standalone.** Section 2 carries the repository's package ({len(ctx['modules'])} modules under "
         f"`{ctx['pkg_rel']}/`, at revision `{ctx['revision'][:12]}`), the stage runner, the hash-locked requirements "
         f"({ctx['lock_packages']} packages) and the pinned checkpoint manifest, and verifies every carried file against its "
@@ -588,7 +589,8 @@ def render(repo: Path, template: dict[str, Any], revision: str | None = None) ->
             "dimer": {
                 "notebook_profile": template["profile"],
                 "notebook_mode": template["mode"],
-                "notebook_spec": NOTEBOOK_SPEC,
+                "notebook_spec": template.get("notebook_spec", NOTEBOOK_SPEC),
+                **({"notebook_kind": template["notebook_kind"]} if template.get("notebook_kind") else {}),
                 "standalone": True,
                 "requires_dimer_worker": False,
                 "environment": "isolated hash-locked uv environment; nothing installed into the kernel",

@@ -457,12 +457,22 @@ def rewrite_model_path(fitted_archive: Path, checkpoint: Path, destination: Path
 
 
 def zip_artifact_bundle(artifact_dir: str | Path, zip_path: str | Path) -> str:
-    """Zip the three bundle members flat (bare names) for transport to the artifact-inference notebook; returns the ZIP SHA-256."""
+    """Zip the three bundle members flat (bare names) for transport; returns the ZIP SHA-256.
+
+    Deterministic: members in sorted order, each with a fixed timestamp (1980-01-01 00:00:00) and mode 0644, so the same
+    member bytes always give the same ZIP digest. The ZIP is written to a temporary file and moved into place atomically.
+    """
     root, zip_path = Path(artifact_dir), Path(zip_path)
     zip_path.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for name in (ARTIFACT_MANIFEST_NAME, FITTED_NAME, CHECKPOINT_NAME):
-            archive.write(root / name, arcname=name)
+    partial = zip_path.with_name(zip_path.name + ".part")
+    with zipfile.ZipFile(partial, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name in sorted((ARTIFACT_MANIFEST_NAME, FITTED_NAME, CHECKPOINT_NAME)):
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o100644 << 16
+            with (root / name).open("rb") as source, archive.open(info, "w") as target:
+                shutil.copyfileobj(source, target, 1024 * 1024)
+    partial.replace(zip_path)
     return sha256_file(zip_path)
 
 
