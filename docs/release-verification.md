@@ -1,10 +1,21 @@
 # Release verification
 
-`tutorials/tabpfn_classifier_colab.ipynb` (`E2E`) and `tutorials/tabpfn_classifier_artifact_inference_colab.ipynb` (`ARTIFACT-INFERENCE`) are **release
-candidates** until the exact notebook revisions have executed top-to-bottom in a clean supported runtime. Unit tests,
-JSON validation, code-cell compilation, and `tools/validate_release_assets.py` are necessary checks but are **not**
-runtime evidence under DIMER Notebook Specification 2.2. This file is the durable release-gate record for both
-notebooks; the previous notebook pair's execution records (worker-driven, NOTEBOOK_SPEC 1.0) are kept below as history.
+`tutorials/tabpfn_classifier_colab.ipynb` (`E2E`, `TUTORIAL`) is a **release candidate** until the exact notebook
+revision has executed top-to-bottom in a clean supported runtime. Unit tests, JSON validation, code-cell compilation, and
+`tools/validate_release_assets.py` are necessary checks but are **not** runtime evidence under DIMER Notebook
+Specification 3.0. This file is the durable release-gate record for the notebook.
+
+**NOTEBOOK_SPEC 3.0 migration (§32.2).** The `ARTIFACT-INFERENCE` companion
+(`tutorials/tabpfn_classifier_artifact_inference_colab.ipynb`) is retired (KND11) and folded into the E2E notebook's
+closing external-artifact section (Section 10, §19.1). Its sample bundle `sample-bundle-v1` was assembled by
+`tools/build_sample_bundle.py` and so does not meet SART9; it is no longer used, and the release is left in place
+(SART7). The section's default artifact is the release asset `sample-artifact-synthetic-v1` /
+`tabpfn_classifier_artifact.zip` (197,068,508 bytes, SHA-256
+`8fe248e2f9841c452316d07ee3e88e5fcde89ec458ff630954028b1c22df1054`, fitted archive
+`1f48ecaf118c834633c8c000579e3f68227cf11c9ae0b146b68509f6f3bb9af6`), the export of a recorded hosted Colab T4 run of
+the E2E default path at `7fce7f9` (blob `a4c8b2904e71`, 2026-10-22, PASSED; SART8, SART9). The companion's rows below
+and the earlier notebook pair's records are kept as history (REL14); none of them is evidence for the migrated
+notebook, which needs its own hosted run (the second pass of §32.2) before promotion.
 
 ## Automatic coverage (static, every pull request)
 
@@ -12,14 +23,13 @@ CI (`.github/workflows/ci.yml`, job `test`) runs `tools/validate_release_assets.
 
 - notebook JSON parses; every code cell compiles as plain Python (no `%`/`!` magics); no persisted outputs or execution
   counts; no unresolved placeholder markers; every code cell is preceded by an explanatory markdown cell;
-- exactly the two tutorial notebooks, each named in `tutorials/README.md` with its profile, the spec version (`2.2`) and
-  the standalone carrier; `metadata.dimer` declares the profile (`E2E`, `ARTIFACT-INFERENCE`), mode `GUIDED`,
+- exactly the one tutorial notebook, named in `tutorials/README.md` with its profile, the spec version (`3.0`) and
+  the standalone carrier; `metadata.dimer` declares the profile `E2E`, kind `TUTORIAL`, mode `GUIDED`,
   `standalone: true` and `generated_from` (repository, generating commit, package paths and SHA-256, carried-file
   digests, generator `build_notebook.py/3.0-tabular`);
 - the standalone carrier and isolated environment (ST1–ST6, PAR1–PAR3, RUN1, RUN10, ENV6): one carrier cell whose carried
   files equal the repository files (`src/tabpfn_classifier_pipeline/{__init__,pipeline}.py`, the stage runner,
-  `tutorials/requirements-colab.lock.txt`, the 4-file snapshot manifest, `NOTICE`, and — once it exists — the companion's
-  pinned sample bundle) with matching digests; the lock pins every `pyproject.toml` runtime pin with hashes; a pinned
+  `tutorials/requirements-colab.lock.txt`, the 4-file snapshot manifest and `NOTICE`) with matching digests; the lock pins every `pyproject.toml` runtime pin with hashes; a pinned
   `uv` builds a managed-CPython environment with `--require-hashes`, reused per lock digest; no in-kernel install and no
   restart instruction; the four Infrastructure cells are titled and collapsed; every learner cell runs a stage; the
   notebook byte-identical to `tools/build_notebook.py` output;
@@ -27,23 +37,24 @@ CI (`.github/workflows/ci.yml`, job `test`) runs `tools/validate_release_assets.
   identifiers (`DROP_COLUMNS`) kept out of the features, numeric columns with stray strings refused, the majority-class
   baseline and the logistic-regression reference, the proposed RUN7 deviation recorded, `save_artifact` + recorded
   feature kinds, the fresh-process reload comparing probabilities on every validation row (`rtol=1e-5`, `atol=1e-6`);
-  companion: trusted ZIP / fitted digests, the member allowlist before extraction, `validate_artifact_bundle` with the
-  checkpoint bound to the pinned one, `from_artifact`, `ID_COLUMNS`, the numeric-type check, a `not-measurable` report,
-  and no self-production; the form-parameter defaults; no quality `assert`; the forbidden patterns;
+  external-artifact section: the exact pinned URL and SHA-256, the digest checked before extraction, the member
+  allowlist, `validate_artifact_bundle` with the fitted archive and checkpoint bound to their pinned digests, the
+  base-model and SART10 data-contract checks, `from_artifact`, outputs under `outputs/external_artifact/`; ST1 allows
+  only that exact URL as a whole token (no prefix match; `..`, `%2e`, `?` and `#` refused); the form-parameter defaults; no quality `assert`; the forbidden patterns;
 - `STATUS.md`, `README.md` and `tutorials/README.md` agree on one release-status token and no document makes an
   unsupported release-grade, production-readiness or benchmark claim;
 - `MODEL_CARD.md` front matter, single H1, required heading order, and the `## Version pinning` section.
 
-CI also runs `ruff check .`, both generator `--check` runs, and the offline tests (`tests/`, no tabpfn, no torch, no
-weights, no Parquet engine), including `test_notebook_review_fixes.py`, which execs the notebooks' own cells with
-stand-ins and runs the model-free stages. These are source and unit checks, **not** execution evidence.
+CI also runs `ruff check .`, the generator `--check` run, and the offline tests (`tests/`, no tabpfn, no torch, no
+weights, no Parquet engine), including `test_notebook_review_fixes.py` and `test_external_artifact_section.py`, which exec
+the notebook's own cells with stand-ins and run the model-free stages (the section against a stand-in artifact). These are source and unit checks, **not** execution evidence.
 
 ## Executor paths
 
 | Path | Runtime | Role |
 |---|---|---|
 | Google Colab (supported user path) | Colab CPU or T4 runtime; any kernel Python — the stages run on the isolated environment's CPython 3.12.12 | The runtime the tutorials are written for; a clean one-pass **Run all** here is promotion evidence |
-| Kaggle kernel | Kaggle CPU or GPU image, any Python | Reproducible clean-room executor of the same class; the notebook runs verbatim (no checkout needed). For the companion set `ARTIFACT_ZIP_PATH`, `EXPECTED_ZIP_SHA256`, `EXPECTED_FITTED_SHA256`, `NEW_DATA_PATH` and `ID_COLUMNS = ['record_id', 'category']` to the E2E run's exports |
+| Kaggle kernel | Kaggle CPU or GPU image, any Python | Reproducible clean-room executor of the same class; the notebook runs verbatim (no checkout needed). |
 
 ## Supported release verification procedure
 
@@ -53,7 +64,8 @@ Before changing the registry status from `Candidate` to `Release-grade`:
 2. open the exact E2E notebook revision in a fresh runtime with **no repository checkout** and a clean model cache;
 3. run it with one **Run all** and no restart, form parameters at their defaults (`USE_BYOD = False`,
    `DROP_COLUMNS = ['record_id', 'category']`, `N_ESTIMATORS = 4`, `SEED = 42`, `USE_BYOD_ROWS = False`,
-   `RUN_ACTIVITY = False`), then re-run the export cell once;
+   `RUN_ACTIVITY = False`, `ARTIFACT_SOURCE = 'Pinned sample artifact'`, `USE_OWN_ROWS = False`), then re-run the
+   export cell once;
 4. verify: the carried-file verification and the isolated environment's versions (CPython 3.12.12, `torch` 2.11.0,
    `tabpfn` 8.1.0); the 4-file snapshot staged and verified; 420 / 90 / 90 rows and 12 features (no `record_id`); the
    input manifest with the `renamed-target-probe` finding; TabPFN's validation and test metrics; the majority baseline
@@ -61,10 +73,10 @@ Before changing the registry status from `Candidate` to `Release-grade`:
    `sample-sanity` with the adaptation deviation; the bundle digests printed; the reload with
    `maxAbsProbabilityDifference` within tolerance; `outputs/tabpfn_classifier_new_rows.csv` and the predictions with
    `record_id` and `category`; the result JSON with source, model identity, licence and runtime;
-5. in a **second** clean runtime run the exact companion revision with `ARTIFACT_ZIP_PATH`, both digests, `NEW_DATA_PATH`
-   and `ID_COLUMNS` set to the E2E exports, and verify the digest checks, the member allowlist, the checkpoint binding,
-   the rebuild, the input manifest, the `not-measurable` report and the predictions; with all fields empty it must stop
-   in Section 4 naming `ARTIFACT_ZIP_PATH` until a pinned sample bundle is added with `tools/build_sample_bundle.py`;
+5. verify the external-artifact section (Section 10): the provenance printed before the download, the pinned ZIP
+   digest verified before extraction, the three members, the fitted-archive and checkpoint digests, the SART10 data
+   contract, the rebuild without refit, eight predictions with `record_id` and `category`, and the two files under
+   `outputs/external_artifact/`;
 6. record the notebook Git blob ids, commit, runtime (platform, Python, PyTorch, tabpfn, device), model identifier and
    immutable revision, whether the model cache was clean, `restarted: false`, outcome, metrics and outputs, and any
    warning or deviation in the table below;

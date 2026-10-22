@@ -11,7 +11,6 @@ pytest -q -m "not integration"
 ruff check .
 python tools/validate_release_assets.py
 python tools/build_notebook.py --check
-python tools/build_notebook.py --check --template tools/notebook_template_artifact_inference.py
 ```
 
 The standalone tutorials are generated from `tools/notebook_template*.py` and `src/tabpfn_classifier_pipeline/pipeline.py`; never edit the `.ipynb` files by hand.

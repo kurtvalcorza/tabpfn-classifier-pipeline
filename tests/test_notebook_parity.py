@@ -30,7 +30,7 @@ def _load(name: str):
 
 
 build = _load("build_notebook")
-TEMPLATES = {name: _load(name).TEMPLATE for name in ("notebook_template", "notebook_template_artifact_inference")}
+TEMPLATES = {name: _load(name).TEMPLATE for name in ("notebook_template",)}
 
 
 def _notebook(template: dict) -> dict:
@@ -80,7 +80,8 @@ def test_par2_lock_pins_every_runtime_pin_with_hashes(name: str) -> None:
     build.check_lock(build._pins(ROOT), lock)  # raises SystemExit on any drift or unhashed entry
     meta = _notebook(template)["metadata"]["dimer"]
     assert meta["standalone"] is True
-    assert meta["notebook_spec"] == build.NOTEBOOK_SPEC
+    assert meta["notebook_spec"] == template.get("notebook_spec", build.NOTEBOOK_SPEC) == "3.0"
+    assert meta["notebook_kind"] == "TUTORIAL"
     assert meta["generated_from"]["module"] == f"src/{template['package']}/{template.get('entry_module', 'pipeline.py')}"
     assert meta["generated_from"]["module_sha256"] == build.load_context(ROOT, template)["module_sha256"]
 
@@ -92,7 +93,7 @@ def test_par3_generator_check_is_clean(name: str) -> None:
     recorded = notebook["metadata"]["dimer"]["generated_from"]["revision"]
     rendered = build.to_bytes(build.render(ROOT, template, recorded))
     current = (ROOT / "tutorials" / template["notebook_name"]).read_bytes().replace(b"\r\n", b"\n")
-    assert current == rendered, "notebook is stale; run python tools/build_notebook.py (with --template for the companion)"
+    assert current == rendered, "notebook is stale; run python tools/build_notebook.py"
 
 
 @pytest.mark.parametrize("name", sorted(TEMPLATES))
@@ -101,12 +102,7 @@ def test_st1_primary_path_has_no_repository_dependency(name: str) -> None:
     own = "\n".join(_source(c) for c in notebook["cells"] if c["cell_type"] == "code" and not c.get("metadata", {}).get("dimer", {}).get("embedded_sources"))
     assert f"import {TEMPLATES[name]['package']}" not in own
     assert f"from {TEMPLATES[name]['package']}" not in own
-    if name == "notebook_template_artifact_inference":
-        # SART6 / ST1 fleet pattern: exactly the pinned release-asset URL is allowed (it carries a SHA-256 in
-        # SAMPLE_ARTIFACT); any other repository URL still fails.
-        pin = json.loads((ROOT / "examples/sample_bundle_pin.json").read_text(encoding="utf-8"))
-        assert own.count(pin["url"]) == 1 and pin["sha256"] in own
-        own = own.replace(pin["url"], "")
+    # SART6 / ST1: the pinned sample-artifact URL lives only in the carried stage runner, never in the notebook's own cells.
     assert "github.com/kurtvalcorza" not in own
     assert "git clone" not in own
     assert "worker.run(" not in own and "worker_cli(" not in own
