@@ -15,7 +15,8 @@ closing external-artifact section (Section 10, §19.1). Its sample bundle `sampl
 `1f48ecaf118c834633c8c000579e3f68227cf11c9ae0b146b68509f6f3bb9af6`), the export of a recorded hosted Colab T4 run of
 the E2E default path at `7fce7f9` (blob `a4c8b2904e71`, 2026-10-22, PASSED; SART8, SART9). The companion's rows below
 and the earlier notebook pair's records are kept as history (REL14); none of them is evidence for the migrated
-notebook, which needs its own hosted run (the second pass of §32.2) before promotion.
+notebook. Its own hosted run (the second pass of §32.2) is the `fcfa6ff` record under *Recorded executions*; what promotion
+still needs is under *Current status*.
 
 ## Automatic coverage (static, every pull request)
 
@@ -149,7 +150,15 @@ clean Colab record, are both still required before either notebook is marked rel
 
 ## Current status
 
-**2026-10-10 — one-pass hosted runs of both current blobs are recorded** (first two rows of the clean-runtime table): `tabpfn_classifier_colab.ipynb` (`a4c8b2904e71`) and `tabpfn_classifier_artifact_inference_colab.ipynb` (`6d7b0040df03`) at `0e5a27c`, each by Colab CLI 0.7.4 sequential execution on a fresh Colab Tesla T4 (not a browser Run all), no restart, 0 error outputs. Notes for the reviewer: (a) the companion's carried revision label reads `uncommitted` and the E2E's reads `ea1d63e` (generation-time HEAD, not `0e5a27c`) — a provenance follow-up; (b) the tamper activity was not exercised (`RUN_ACTIVITY` off by default), only the `SCHEMA_MISMATCH` refusal ran; (c) the `sample-bundle-v1` release download and its SHA-256 verification were exercised for real. Both notebooks stay **Candidate**; remaining gates: reviewer confirmation of these runs, the BYOD journeys, and the optional activities (including the tamper refusal on a hosted runtime).
+**Current status (2026-10-22): Candidate.** The current E2E notebook blob is `d766d7b7` (`tutorials/tabpfn_classifier_colab.ipynb` at `fcfa6ff`, unchanged on `main` at `94487aa`). Its default path has one recorded hosted run of this blob: the `fcfa6ff` record (*First hosted run of the migrated notebook*, under *Recorded executions*), evidence in `execution-evidence/2026-10-22-fcfa6ff/`. It ran by Colab CLI `colab exec -f` (scripted, not a browser Run all) on a fresh Colab Tesla T4: exit 0, 14/14 code cells, 0 error outputs, 161.8 s, input unchanged, verdict PASS. In that run the fresh-boundary reload passed and Section 10 verified both pinned digests of the `sample-artifact-synthetic-v1` asset before deserialisation. The notebook stays **Candidate** until these are recorded for this blob:
+
+- **REL12:** a BYOD run in which one representative input is accepted through the downstream stages and one incompatible input is refused;
+- **REL2:** a browser run of the interactive journeys (BYOD upload dialog, optional-activity toggle, own-artifact ZIP); the scripted CLI run counts for the default path only;
+- **Optional activity:** a run of the Section 11 ensemble-size activity (`RUN_ACTIVITY`); the `fcfa6ff` run printed "Optional activity skipped". The owner ruled on 2026-10-22 that it must be run before promotion.
+
+Promotion is an integrator decision; the builder does not change the status.
+
+**History, 2026-10-10 (blobs `a4c8b2904e71` and `6d7b0040df03`, both superseded; not evidence for the current blob, REL14) — one-pass hosted runs of both then-current blobs were recorded** (first two rows of the clean-runtime table): `tabpfn_classifier_colab.ipynb` (`a4c8b2904e71`) and `tabpfn_classifier_artifact_inference_colab.ipynb` (`6d7b0040df03`) at `0e5a27c`, each by Colab CLI 0.7.4 sequential execution on a fresh Colab Tesla T4 (not a browser Run all), no restart, 0 error outputs. Notes for the reviewer: (a) the companion's carried revision label reads `uncommitted` and the E2E's reads `ea1d63e` (generation-time HEAD, not `0e5a27c`) — a provenance follow-up; (b) the tamper activity was not exercised (`RUN_ACTIVITY` off by default), only the `SCHEMA_MISMATCH` refusal ran; (c) the `sample-bundle-v1` release download and its SHA-256 verification were exercised for real. Both notebooks stayed **Candidate**; the gates then remaining were reviewer confirmation of these runs, the BYOD journeys, and the optional activities (including the tamper refusal on a hosted runtime).
 
 Before 2026-10-10: no clean-runtime execution of the current standalone notebook blobs had been recorded; the only clean-room run was the
 Kaggle CPU run of an earlier E2E blob above. Static validation (`tools/validate_release_assets.py`), the generator parity checks, a `compile()` sweep
