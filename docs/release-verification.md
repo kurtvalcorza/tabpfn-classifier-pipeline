@@ -99,6 +99,28 @@ download; they are measurements for the stated runtime, not general estimates.
 | 2026-10-10 | `0e5a27c` / `6d7b0040df03` of `tabpfn_classifier_artifact_inference_colab.ipynb`, downloaded from GitHub at the PR head and blob-verified before the session; executed file `docs/execution-evidence/2026-10-10/tabpfn_classifier_artifact_inference_colab_0e5a27c_colab-cli-t4.ipynb`, sha256 `1fd43670e1ab8fc598eaebe2ad8706fc347db78eae92af72e50ec61e93685d54` (`…_run_summary.json` `d7d0c1e0f051…`, `…_exec.log` `918a69fdec3a…`) | Colab CLI 0.7.4 sequential execution, fresh Colab Tesla T4, via the workspace `colab-cli-serial-test-suite`; same 63-package isolated uv environment, built fresh. Not a browser Run all; order from the CLI log (1/9–9/9) | Artifact inference, default pinned sample: the `sample-bundle-v1` release asset was **downloaded for real** and verified before extraction; checkpoint fetched from the Hub and digest-verified | 104.6 s session wall | **PASSED — one pass, no restart, 0 errors, 9/9 code cells.** Release download exercised: `tabpfn_classifier_sample_bundle.zip` 169,881 bytes, SHA-256 `d61f1c2642154c2ab0d7a81954ec6522a908e690177f9723563ab44054fde0ba` verified before extraction, sample files verified against `SAMPLE_BUNDLE.json`; reconstructed from the artifact on cuda (no refit, no network fallback for weights); extra-column probe refused (`SCHEMA_MISMATCH`); predictions on the eight rows identical to the E2E run's; report `not-measurable` (no labels). **The tamper activity was not exercised** (`RUN_ACTIVITY` off by default; cell 9 skipped), so the only refusal run was `SCHEMA_MISMATCH`. Carried provenance reads `uncommitted` (git rev-parse failed during regeneration, `tools/build_notebook.py`); provenance-only, follow-up. BYOD not exercised. Status stays **Candidate** |
 | 2026-09-14 | `1d93609` / `ccdcd20093ed` | Kaggle CPU (`kurtvalcorza/dimer-nb2-tabpfn-classifier` v1; image torch 2.10.0+cpu) | E2E, default sample path | 203.5 s | **PASSED** — 10/10 ok code cells, `restarted`: no (none recorded), 10 files, 213 MB staged. Metrics and package versions were not captured by that executor's ledger. A Kaggle CPU image, not Colab, and an earlier blob than the current E2E notebook, so it is not evidence for the current candidate |
 
+**First hosted run of the migrated notebook (2026-10-22, `fcfa6ff` / blob `d766d7b710ec`, Notebook Spec 3.0; the second pass of
+§32.2).** Colab CLI 0.7.4 `colab exec -f` on a fresh Colab Tesla T4, default path of `tutorials/tabpfn_classifier_colab.ipynb` on
+PR #24, started 2026-10-22T04:00:12Z, wall 161.8 s, exit 0, input unchanged; executed cell sources equal the blob (44 cells);
+verdict PASS. Evidence: `docs/execution-evidence/2026-10-22-fcfa6ff/`. The fresh-boundary reload passed (probabilities equivalent
+on 90 validation rows). **Section 10 ran end to end on the default path with real tabpfn:** it downloaded the 197,068,508-byte
+release asset of tag `sample-artifact-synthetic-v1`, verified both pinned digests before deserialisation (ZIP
+`8fe248e2f9841c452316d07ee3e88e5fcde89ec458ff630954028b1c22df1054`, fitted estimator
+`1f48ecaf118c834633c8c000579e3f68227cf11c9ae0b146b68509f6f3bb9af6`), rebuilt the classifier from the files alone and wrote
+`outputs/external_artifact/tabpfn_classifier_external_predictions.csv` and `..._external_result.json` (printed in the executed
+notebook; the files stayed on the released VM). This run's own export printed fitted-estimator SHA-256
+`9b27a525ca46870329918f997381e6c1f5fb702a73a916b2cd23cf75e3b32fad` and bundle ZIP `247d3c633b6c8b61af034c037de3078545f28231edefec06bb0b9448e2ddb0ae`:
+the fitted `.tabpfn_fit` file is not byte-reproducible across runs, so a re-export does not reproduce the pinned digests even
+with the deterministic ZIP writer. The pin stays valid because it names one recorded run's export (SART8/SART9); a re-pin
+(SART11) publishes a new tag. Local paths were replaced by `<local-run-dir>/` before the first commit:
+
+| File (under `execution-evidence/2026-10-22-fcfa6ff/`) | Captured | Committed |
+|---|---|---|
+| `tabpfn_classifier_colab_fcfa6ff_colab-cli-t4.ipynb` | `dd781497b1d4aebc05352e8bb51f3abdd950b732f7406b8fe6efda240992d62d` | unchanged (no local path) |
+| `tabpfn_classifier_colab_fcfa6ff_colab-cli-t4_run_summary.json` | `2da1ca66ad616bf1b24a0e3e9402703e9a4e36af0c570ca42e5472f4e4b5286b` | unchanged (no local path) |
+| `tabpfn_classifier_colab_fcfa6ff_colab-cli-t4_exec.log` | `a6dc465fcc8efc8f5918f38f82be418579172a9c36a001f4f8556820a9782668` | `e827b1f4dca093669219a5c4f4a42e78932842724f894d7bfcc01cf81145c366` |
+| `tabpfn_classifier_colab_fcfa6ff_colab-cli-t4_suite.log` | `3c833899455cf92060665079b6e41e4d7e4e61575a087c1e1f2cda0f6722a292` | `ca55c93e17860557f1214414717fb15e576d7f3159a1f06213aad15b0d4c8147` |
+
 ### Local lock-only drives (not clean-runtime evidence)
 
 Code cells driven in order by a plain-CPython stand-in kernel on Linux x86_64 (WSL2), CPU only (`CUDA_VISIBLE_DEVICES=-1`), inside each notebook's own isolated hash-locked uv environment (CPython 3.12.12; torch 2.11.0, tabpfn 8.1.0, numpy 2.5.3, pandas 2.3.2, scikit-learn 1.9.0; 63 locked packages), default form values. The checkpoint was copied in from a local checkout and digest-verified (`d0d865d5…`), so the Hub download was not exercised; no notebook kernel, no Colab.
