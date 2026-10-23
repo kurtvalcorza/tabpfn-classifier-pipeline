@@ -8,17 +8,23 @@ Every file in the asset, and in every archive nested inside it, gets its own ver
   clean      every global is innocuous or suspicious, and the whole file was read;
   dangerous  any global picklescan classifies as dangerous;
   incomplete the file could not be read to the end by any recorded method.
-A PyTorch zip (.pt/.ckpt/.pth/.bin) is scanned in place; any other zip is extracted (path-checked)
-and its members are queued, so archives inside archives are reached. A file that cannot be read as
-a pickle to the end is incomplete, never clean. joblib files, which interleave raw numpy bytes with
-pickle instructions, get a restricted load when picklescan stops early: joblib's own reader runs
-with find_class replaced so that only numpy's array and scalar rebuilders, numpy.dtype and joblib's
-NumpyArrayWrapper are real; every other global is an inert stub, recorded, and classified with
-picklescan's own tables. Payloads of torch.storage._load_from_bytes are captured as files and
-scanned like any other file, never loaded.
+Content decides, not the file name: picklescan reads every file's bytes, and a file is pickle
+content if its extension says so or if parsing it yields globals that are well-formed Python
+identifiers (this finds protocol 0/1 pickles under any name). Every zip and tar, PyTorch zips
+included, is extracted with member-path, link and duplicate-name checks and its members are queued,
+so archives inside archives are reached; a pickle stream in front of an archive is judged too.
+gzip, bzip2, xz, zstd, lz4, zlib, 7z and rar content is not decompressed and is incomplete. A file
+that cannot be read as a pickle to the end, or that picklescan itself fails on, is incomplete,
+never clean. Pickles that interleave raw numpy bytes with instructions (joblib) get a restricted
+load when picklescan stops early: joblib's own reader runs with find_class replaced so that only
+numpy's array and scalar rebuilders, numpy.dtype and joblib's NumpyArrayWrapper are real; every
+other global is an inert stub, recorded, and classified with picklescan's own tables. Payloads of
+torch.storage._load_from_bytes are captured as files and scanned like any other file, never loaded.
+Not covered: data a loader decompresses or decodes with no format marker (for example raw deflate).
 
 Exit status: 0 all clean; 1 any dangerous; 2 any incomplete (and none dangerous); 3 the asset could
-not be scanned (bad archive, unsafe member path). The report holds only paths relative to the asset.
+not be scanned (bad archive, unsafe or duplicate member, unexpected error). The report holds only
+paths relative to the asset.
 """
 from __future__ import annotations
 
@@ -29,8 +35,10 @@ import io
 import pathlib
 import pickle
 import pickletools
+import re
 import shutil
 import sys
+import tarfile
 import tempfile
 import zipfile
 from importlib.metadata import version
@@ -39,7 +47,7 @@ import joblib.numpy_pickle as jnp
 from picklescan.scanner import (
     SafetyLevel,
     _build_scan_result_from_raw_globals,
-    scan_file_path,
+    scan_pickle_bytes,
 )
 
 PYTORCH_EXT = {".pt", ".ckpt", ".pth", ".bin"}
@@ -63,32 +71,57 @@ def sha256(path: pathlib.Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _check_member(name: str, root: pathlib.Path, seen: set[str]) -> pathlib.Path:
+    target = (root / name).resolve()
+    if name.startswith(("/", "\\")) or ".." in pathlib.PurePosixPath(name.replace("\\", "/")).parts \
+            or not target.is_relative_to(root.resolve()):
+        raise ScanAbort(f"unsafe member path {name!r}")
+    key = pathlib.PurePosixPath(name.replace("\\", "/")).as_posix().rstrip("/").lower()
+    if key in seen:
+        raise ScanAbort(f"duplicate member name {name!r}")
+    seen.add(key)
+    return target
+
+
 def safe_extract(archive: pathlib.Path, dest: pathlib.Path) -> list[pathlib.Path]:
-    """Extract every member, or abort: bad CRC, absolute or escaping paths, links."""
+    """Extract a zip or tar completely, or abort: bad CRC, absolute or escaping paths, links,
+    special files, duplicate member names (a loader and this scan could read different copies)."""
+    out, seen = [], set()
     try:
-        with zipfile.ZipFile(archive) as zf:
-            bad = zf.testzip()
-            if bad is not None:
-                raise ScanAbort(f"CRC error in {bad}")
-            out = []
-            root = dest.resolve()
-            for info in zf.infolist():
-                name = info.filename
-                target = (dest / name).resolve()
-                if name.startswith(("/", "\\")) or ".." in pathlib.PurePosixPath(name).parts \
-                        or not target.is_relative_to(root):
-                    raise ScanAbort(f"unsafe member path {name!r}")
-                if (info.external_attr >> 16) & 0o170000 == 0o120000:
-                    raise ScanAbort(f"symlink member {name!r}")
-                if info.is_dir():
-                    target.mkdir(parents=True, exist_ok=True)
-                    continue
-                target.parent.mkdir(parents=True, exist_ok=True)
-                with zf.open(info) as src, open(target, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
-                out.append(target)
-            return out
-    except (zipfile.BadZipFile, OSError, RuntimeError, NotImplementedError) as exc:
+        if zipfile.is_zipfile(archive):
+            with zipfile.ZipFile(archive) as zf:
+                bad = zf.testzip()
+                if bad is not None:
+                    raise ScanAbort(f"CRC error in {bad}")
+                for info in zf.infolist():
+                    target = _check_member(info.filename, dest, seen)
+                    if (info.external_attr >> 16) & 0o170000 == 0o120000:
+                        raise ScanAbort(f"symlink member {info.filename!r}")
+                    if info.is_dir():
+                        target.mkdir(parents=True, exist_ok=True)
+                        continue
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with zf.open(info) as src, open(target, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    out.append(target)
+        else:
+            with tarfile.open(archive) as tf:
+                for info in tf.getmembers():
+                    target = _check_member(info.name, dest, seen)
+                    if info.isdir():
+                        target.mkdir(parents=True, exist_ok=True)
+                        continue
+                    if not info.isfile():
+                        raise ScanAbort(f"non-regular tar member {info.name!r}")
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with tf.extractfile(info) as src, open(target, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    out.append(target)
+        return out
+    except ScanAbort:
+        raise
+    except (zipfile.BadZipFile, tarfile.TarError, OSError, RuntimeError, NotImplementedError,
+            EOFError) as exc:
         raise ScanAbort(f"cannot extract {archive.name}: {type(exc).__name__}: {exc}") from exc
 
 
@@ -109,9 +142,20 @@ def reads_to_end(data: bytes, max_pickles: int | None = None) -> bool:
     return count > 0 and max_pickles is None
 
 
-def picklescan_globals(path: pathlib.Path):
-    res = scan_file_path(str(path))
-    return res, [(g.module, g.name, g.safety.value) for g in res.globals]
+def picklescan_globals(data: bytes, file_id: str):
+    """picklescan on the bytes themselves, whatever the file is called (no extension dispatch)."""
+    try:
+        res = scan_pickle_bytes(io.BytesIO(data), file_id, multiple_pickles=True)
+    except Exception:  # picklescan itself can raise on malformed streams; never treat that as clean
+        return False, []
+    return True, [(g.module, g.name, g.safety.value) for g in res.globals]
+
+
+IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
+# Formats a loader could decompress before unpickling; their contents are not scanned here.
+OPAQUE = {b"\x1f\x8b": "gzip", b"BZh": "bzip2", b"\xfd7zXZ\x00": "xz", b"\x28\xb5\x2f\xfd": "zstd",
+          b"\x04\x22\x4d\x18": "lz4", b"7z\xbc\xaf\x27\x1c": "7z", b"Rar!\x1a\x07": "rar",
+          b"\x78\x01": "zlib", b"\x78\x5e": "zlib", b"\x78\x9c": "zlib", b"\x78\xda": "zlib"}
 
 
 def classify(raw: set[tuple[str, str]]):
@@ -195,37 +239,44 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
 
     while queue:
         f = queue.popleft()
+        data = f.read_bytes()
         ext = f.suffix.lower()
-        head = f.read_bytes()[:2]
-        if zipfile.is_zipfile(f) and ext not in PYTORCH_EXT:
+        is_zip = zipfile.is_zipfile(f)
+        is_tar = not is_zip and tarfile.is_tarfile(f)
+        ps_ok, globs = picklescan_globals(data, rel(f))
+        hinted = ext in PICKLE_EXT or ext in PYTORCH_EXT or f.parent == nested_dir
+        # Content decides, not the name: a file is pickle content if its name says so, or if parsing
+        # it yields globals that are well-formed Python identifiers. Running code from a pickle needs
+        # at least one global, so this catches dangerous pickles under any name and any protocol;
+        # tensor bytes (which may start with 0x80 by chance) do not parse into identifiers.
+        is_pickle = (hinted and not (is_zip or is_tar)) or (
+            bool(globs) and all(IDENT.match(m) and IDENT.match(n) for m, n, _ in globs))
+        if is_zip or is_tar:
+            # Every archive is unpacked, PyTorch zips included, so each member gets its own verdict.
+            # A pickle stream in front of an archive (a polyglot) is judged as well.
             members = safe_extract(f, f.with_name(f.name + ".x"))
             queue.extend(members)
-            results.append({"file": rel(f), "kind": "archive", "verdict": "extracted",
-                            "detail": f"{len(members)} members queued"})
-            continue
-        if f.read_bytes()[:3] in (b"\x1f\x8b\x08",) or head == b"BZ" or f.read_bytes()[:6] == b"\xfd7zXZ\x00":
-            results.append({"file": rel(f), "kind": "compressed", "verdict": "incomplete",
-                            "methods": ["not decompressed: contents unscanned"], "globals": []})
-            continue
-        is_pickle = ext in PICKLE_EXT or ext in PYTORCH_EXT or head[:1] == b"\x80" \
-            or f.parent == nested_dir
+            results.append({"file": rel(f), "kind": "pytorch-zip" if ext in PYTORCH_EXT else "archive",
+                            "verdict": "extracted", "detail": f"{len(members)} members queued"})
+            if not is_pickle:
+                continue
         if not is_pickle:
+            for magic, fmt in OPAQUE.items():
+                if data.startswith(magic):
+                    results.append({"file": rel(f), "kind": f"compressed ({fmt})", "verdict": "incomplete",
+                                    "methods": ["not decompressed: contents unscanned"], "globals": []})
+                    break
             continue
-        res, globs = picklescan_globals(f)
-        methods = ["picklescan 1.0.5"]
-        if zipfile.is_zipfile(f):
-            kind = "pytorch-zip"
-            with zipfile.ZipFile(f) as zf:
-                pkls = [n for n in zf.namelist() if n.endswith(".pkl")]
-                complete = bool(pkls) and all(reads_to_end(zf.read(n)) for n in pkls)
-        elif f.parent == nested_dir or (ext in PYTORCH_EXT and not zipfile.is_zipfile(f)):
+        methods = ["picklescan 1.0.5 (bytes)" if ps_ok else "picklescan 1.0.5 (bytes): parser error"]
+        if f.parent == nested_dir or (ext in PYTORCH_EXT and not is_zip):
             kind = "legacy-torch"
             # magic, protocol, sys_info, object, storage keys; raw storage bytes follow
-            complete = not res.scan_err and reads_to_end(f.read_bytes(), max_pickles=5)
+            complete = ps_ok and reads_to_end(data, max_pickles=5)
         else:
-            kind = "joblib" if ext == ".joblib" else "pickle"
-            complete = not res.scan_err and reads_to_end(f.read_bytes())
-        if kind == "joblib" and not complete:
+            kind = "pickle+archive" if (is_zip or is_tar) else ("joblib" if ext == ".joblib" else "pickle")
+            complete = ps_ok and not (is_zip or is_tar) and reads_to_end(data)
+        if not complete and kind in ("pickle", "joblib"):
+            # joblib (under any name) interleaves raw numpy bytes with pickle instructions
             parsed, raw, payloads = restricted_inventory(f, nested_dir)
             methods.append("restricted load (joblib 1.6.0, numpy 2.5.4)")
             # A complete restricted load saw every global the reader resolved; picklescan's partial
@@ -257,6 +308,8 @@ def main(argv=None) -> int:
             aborted = None
         except ScanAbort as exc:
             results, aborted = [], str(exc)
+        except Exception as exc:  # anything unexpected means the asset was not scanned
+            results, aborted = [], f"unexpected {type(exc).__name__}: {exc}"
     finally:
         shutil.rmtree(work, ignore_errors=True)
     verdicts = collections.Counter(r["verdict"] for r in results)
@@ -277,7 +330,7 @@ def main(argv=None) -> int:
         status = 2
     else:
         status = 0
-    scanned = sum(1 for r in results if r["kind"] != "archive")
+    scanned = sum(1 for r in results if r["verdict"] in ("clean", "dangerous", "incomplete"))
     lines.append(f"summary: {scanned} pickle files; clean={verdicts['clean']} "
                  f"dangerous={verdicts['dangerous']} incomplete={verdicts['incomplete']}")
     lines.append(f"scan_status={status}")

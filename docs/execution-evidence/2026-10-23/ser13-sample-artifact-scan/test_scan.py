@@ -110,7 +110,7 @@ def test_dangerous_legacy_torch_payload_is_not_masked(tmp_path):
     assert status == 1, text
 
 
-def test_pytorch_zip_scanned_in_place_once(tmp_path):
+def test_pytorch_zip_members_judged_once(tmp_path):
     pt = io.BytesIO()
     with zipfile.ZipFile(pt, "w") as zf:
         zf.writestr("archive/data.pkl", CLEAN)
@@ -118,7 +118,7 @@ def test_pytorch_zip_scanned_in_place_once(tmp_path):
     asset = make_zip(tmp_path / "a.zip", {"model.ckpt": pt.getvalue()})
     status, text = run(tmp_path, asset)
     assert status == 0, text
-    assert text.count("[pytorch-zip]") == 1 and "data.pkl [" not in text
+    assert text.count("[pytorch-zip]") == 1 and text.count("data.pkl [") == 1
 
 
 @pytest.mark.parametrize("data", [b"not a zip", b"PK\x03\x04truncated"])
@@ -139,3 +139,88 @@ def test_report_has_no_absolute_paths(tmp_path):
     asset = make_zip(tmp_path / "a.zip", {"m.pkl": CLEAN})
     _, text = run(tmp_path, asset)
     assert str(tmp_path) not in text and str(tmp_path.as_posix()) not in text
+
+
+PROTO0_EVIL = b"cos\nsystem\n(t."      # protocol 0: starts with an opcode letter, not 0x80
+
+
+def test_protocol0_pickle_under_a_text_name_is_found(tmp_path):
+    # Claude review SCAN-1: detection by extension or 0x80 missed protocol 0/1 pickles
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"notes.txt": PROTO0_EVIL}))
+    assert status == 1, text
+    assert "notes.txt [pickle] DANGEROUS" in text
+
+
+def test_pickle_zip_polyglot_is_scanned_as_both(tmp_path):
+    # Claude review SCAN-2: a pickle in front of a zip was only extracted as an archive
+    inner = io.BytesIO()
+    with zipfile.ZipFile(inner, "w") as zf:
+        zf.writestr("x.txt", b"x")
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.pkl": PROTO0_EVIL + inner.getvalue()}))
+    assert status == 1, text
+    assert "[pickle+archive] DANGEROUS" in text
+
+
+def test_every_pytorch_zip_member_is_judged(tmp_path):
+    # Claude review SCAN-3: only *.pkl members of a PyTorch zip were checked
+    pt = io.BytesIO()
+    with zipfile.ZipFile(pt, "w") as zf:
+        zf.writestr("archive/data.pkl", CLEAN)
+        zf.writestr("archive/payload.xyz", PROTO0_EVIL)
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.pt": pt.getvalue()}))
+    assert status == 1, text
+    assert "payload.xyz [pickle] DANGEROUS" in text
+
+
+def test_truncated_pickle_member_of_pytorch_zip_is_incomplete(tmp_path):
+    pt = io.BytesIO()
+    with zipfile.ZipFile(pt, "w") as zf:
+        zf.writestr("archive/data.pkl", CLEAN)
+        zf.writestr("archive/extra.data", CLEAN[:-3])
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.pt": pt.getvalue()}))
+    assert status == 2, text
+
+
+@pytest.mark.parametrize("fmt,data", [
+    ("zlib", __import__("zlib").compress(EVIL)),
+    ("bzip2", __import__("bz2").compress(EVIL)),
+    ("xz", __import__("lzma").compress(EVIL)),
+])
+def test_opaque_compression_is_incomplete(tmp_path, fmt, data):
+    # Claude review SCAN-4: only gzip/bz2/xz were recognised, by name
+    status, text = run(tmp_path, make_zip(tmp_path / f"{fmt}.zip", {"model.z": data}))
+    assert status == 2, text
+    assert f"compressed ({fmt})" in text
+
+
+def test_duplicate_member_names_fail_closed(tmp_path):
+    # Claude review SCAN-5: a loader and the scan could read different copies
+    asset = tmp_path / "a.zip"
+    with zipfile.ZipFile(asset, "w") as zf:
+        zf.writestr("model.pkl", EVIL)
+        with pytest.warns(UserWarning):
+            zf.writestr("model.pkl", CLEAN)
+    status, text = run(tmp_path, asset)
+    assert status == 3, text
+
+
+def test_tar_members_are_scanned(tmp_path):
+    import tarfile
+    tar = tmp_path / "inner.tar"
+    with tarfile.open(tar, "w") as tf:
+        info = tarfile.TarInfo("deep/evil.pkl")
+        info.size = len(EVIL)
+        tf.addfile(info, io.BytesIO(EVIL))
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"bundle.tar": tar.read_bytes()}))
+    assert status == 1, text
+
+
+def test_random_tensor_bytes_are_not_pickle_content(tmp_path):
+    rng = np.random.default_rng(0)
+    pt = io.BytesIO()
+    with zipfile.ZipFile(pt, "w") as zf:
+        zf.writestr("archive/data.pkl", CLEAN)
+        for i in range(64):
+            zf.writestr(f"archive/data/{i}", rng.bytes(4096))
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.pt": pt.getvalue()}))
+    assert status == 0, text
