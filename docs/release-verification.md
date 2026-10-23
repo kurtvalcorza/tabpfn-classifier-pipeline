@@ -122,7 +122,7 @@ with the deterministic ZIP writer. The pin stays valid because it names one reco
 | `tabpfn_classifier_colab_fcfa6ff_colab-cli-t4_exec.log` | `a6dc465fcc8efc8f5918f38f82be418579172a9c36a001f4f8556820a9782668` | `e827b1f4dca093669219a5c4f4a42e78932842724f894d7bfcc01cf81145c366` |
 | `tabpfn_classifier_colab_fcfa6ff_colab-cli-t4_suite.log` | `3c833899455cf92060665079b6e41e4d7e4e61575a087c1e1f2cda0f6722a292` | `ca55c93e17860557f1214414717fb15e576d7f3159a1f06213aad15b0d4c8147` |
 
-**Hosted default-path run of the current blob (2026-10-22, `197d45b` / blob `7d8051f712ad`).** Colab CLI 0.7.5 `colab exec -f`
+**Hosted default-path run of blob `7d8051f712ad` (2026-10-22, `197d45b`; the current blob until `c6e880b`, now history).** Colab CLI 0.7.5 `colab exec -f`
 (a scripted run, not a browser Run all) on a fresh Colab Tesla T4, default path of `tutorials/tabpfn_classifier_colab.ipynb`
 at `197d45b`, executed as committed, started 2026-10-22T13:21:05Z, wall 220.9 s, exit 0, sequential, input unchanged, 14/14
 code cells, 0 errors, verdict PASS. Evidence: `docs/execution-evidence/2026-10-22-197d45b/`. Printed: validation accuracy 0.9778 / log loss
@@ -137,7 +137,7 @@ by `<local-run-dir>` before the first commit:
 | `tabpfn_classifier_colab_197d45b_colab-cli-t4_exec.log` | `1f4e670511a9ed976d06c9dc76693269ca8dd8afe2b812392a276d8c7bcdcdef` | `dd55e5f6aabac33c34f9ffea5e207b6d73a166672c98155cbe995e4fe0ba4395` (2 replacements) |
 | `tabpfn_classifier_colab_197d45b_colab-cli-t4_run_summary.json` | `6137e1353f5bd320a53075bca09213e947fdc3a7c4f09895a89b7f7009836e6c` | unchanged (no local path) |
 
-**Optional-activity run of the current blob (2026-10-22, `197d45b` / blob `7d8051f712ad`, `RUN_ACTIVITY = True`).** A run copy of
+**Optional-activity run of blob `7d8051f712ad` (2026-10-22, `197d45b`, `RUN_ACTIVITY = True`; history).** A run copy of
 committed blob `7d8051f7` with one override, `RUN_ACTIVITY = False` → `True` (run copy blob `586d5f40fe54`, SHA-256
 `1d36ec2ecbff48c3991f0a58a7a2da2e243093a20f1a12d59e595d6dc5d08d47`; it differs from the committed blob only in that assignment
 literal and is committed beside the evidence as `…_activity_run_copy.ipynb`), run by Colab CLI 0.7.5 `colab exec -f` (scripted,
@@ -153,6 +153,41 @@ validation rows (`one_row_resolution` 0.0111), `max_abs_probability_change` 0.10
 | `tabpfn_classifier_colab_197d45b_colab-cli-t4_activity_exec.log` | `f6edb1da7dcb269f82b736280f772138027392e250cdf2fc1500cdfe31cb037b` | `b4a591f8e3c1ae0cef4d3eaa8f4e5a9485b24e95c7aab3d88fc9b44795665531` (2 replacements) |
 | `tabpfn_classifier_colab_197d45b_colab-cli-t4_activity_run_summary.json` | `9655dc7351df3e0bdec272ce7647b477e1ce8f5862a47cea4acf0fadf207d468` | unchanged (no local path) |
 | `tabpfn_classifier_colab_197d45b_colab-cli-t4_activity_run_copy.ipynb` | `1d36ec2ecbff48c3991f0a58a7a2da2e243093a20f1a12d59e595d6dc5d08d47` | unchanged (no local path) |
+
+**Hosted default-path run of blob `e705db6eb176` (2026-10-23, `9e69f88`; the current blob).** Colab CLI `colab exec -f`
+(a scripted run, not a browser Run all) on a fresh Colab Tesla T4, default path of `tutorials/tabpfn_classifier_colab.ipynb`
+at `9e69f88`, executed as committed, started 2026-10-23T08:53:20Z, wall 142.0 s, exit 0, sequential, input unchanged, 14/14
+code cells, 0 errors, verdict PASS. Evidence: `docs/execution-evidence/2026-10-23-9e69f88/`. Printed: majority-class baseline
+validation accuracy 0.3333; TabPFN validation accuracy 0.9778 / log loss 0.0658 / ROC AUC 0.9994, test accuracy 0.9778 / log
+loss 0.0794 / ROC AUC 0.9978; logistic-regression reference 0.9111 (validation) / 0.9444 (test); "Fresh-boundary verification
+PASSED: probabilities equivalent on 90 validation rows (rtol=1e-05, atol=1e-06)"; Section 10 reported `trusted_digest: verified
+(pinned SAMPLE_ARTIFACT_SHA256 and SAMPLE_ARTIFACT_FITTED_SHA256)` for `8fe248e2…`; the activity cell printed "Optional activity
+skipped". The default path supplies no refused user input, so the new `Refused:` display was not exercised by this run. Local
+paths were replaced by `<local-run-dir>` before the first commit:
+
+| File (under `execution-evidence/2026-10-23-9e69f88/`) | Captured | Committed |
+|---|---|---|
+| `tabpfn_classifier_colab_9e69f88_colab-cli-t4.ipynb` | `2d27ba305f0d1c17b660ed585a1ca2f89ef8ba050c74d27dc20a1114f48f7e19` | unchanged (no local path) |
+| `tabpfn_classifier_colab_9e69f88_colab-cli-t4_exec.log` | `c305728676a76dbc4a888cdb4ebb0f7424fab8e3513e86d26b8da0f7425d53a2` | `1f0b18e82f6338d9b65de157eedebd511e1d7c6e8ffb69eb438322eae48d4de7` (2 replacements) |
+| `tabpfn_classifier_colab_9e69f88_colab-cli-t4_run_summary.json` | `3648cc0fd260d98aba47625f67238fe72ab109058b88cbf3c66b48f25c0b1a5e` | unchanged (no local path) |
+
+**Optional-activity run of blob `e705db6eb176` (2026-10-23, `9e69f88`, `RUN_ACTIVITY = True`; the current blob).** A run copy
+of committed blob `e705db6e` with one override, `RUN_ACTIVITY = False` → `True` (run copy blob `9cb5e29298ac`, SHA-256
+`e9d59aef2f2a891f18ba616d5d97b9f48e34ae75e66c224225b7385ee22564ab`; it differs from the committed blob only in that assignment
+literal and is committed beside the evidence as `…_activity_run_copy.ipynb`), run by Colab CLI `colab exec -f` (scripted, not a
+browser Run all) on a fresh Colab Tesla T4, started 2026-10-23T08:53:45Z, wall 319.7 s, exit 0, sequential, input (the run copy)
+unchanged, 14/14 code cells, 0 errors, verdict PASS. Evidence: `docs/execution-evidence/2026-10-23-9e69f88-activity/`. The
+canonical stages printed the same metrics as the default-path run above. The Section 11 activity (`n_estimators` 4 → 1)
+printed validation accuracy 0.9778 → 0.9778, log loss 0.0658 → 0.0607, ROC AUC 0.9994 → 0.9998 on 90 validation rows,
+`max_abs_probability_change` 0.1001, `labels_changed` 0, and `{'canonical_outputs_unchanged': True}`. Local paths were
+replaced by `<local-run-dir>` before the first commit:
+
+| File (under `execution-evidence/2026-10-23-9e69f88-activity/`) | Captured | Committed |
+|---|---|---|
+| `tabpfn_classifier_colab_9e69f88_colab-cli-t4_activity.ipynb` | `d506a341411a616e3c6830f21c96a7e020d005ce6226253b16d70fa7c1164ff8` | unchanged (no local path) |
+| `tabpfn_classifier_colab_9e69f88_colab-cli-t4_activity_exec.log` | `027769edf6e3e6a40ae1cfdada2ecbde230faa37e9da0fcfd9bdb432ec07ae59` | `9a95a32f96c128eb2bff901211cb589e0046d6262784391bb318182db81824f9` (2 replacements) |
+| `tabpfn_classifier_colab_9e69f88_colab-cli-t4_activity_run_copy.ipynb` | `e9d59aef2f2a891f18ba616d5d97b9f48e34ae75e66c224225b7385ee22564ab` | unchanged (no local path) |
+| `tabpfn_classifier_colab_9e69f88_colab-cli-t4_activity_run_summary.json` | `3babac27e56c93db90bb29ba08b8a1f1a31fe2c4a8c814a559913bf74be85a2c` | unchanged (no local path) |
 
 ### Local lock-only drives (not clean-runtime evidence)
 
@@ -182,7 +217,7 @@ clean Colab record, are both still required before either notebook is marked rel
 
 ## Current status
 
-**Current status (2026-10-22): Candidate.** The current E2E notebook blob is `7d8051f7` (`tutorials/tabpfn_classifier_colab.ipynb`, regenerated from template commit `95d9e34` on `docs/rel14-status`; a text-only change that drops the notebook's own run-status claims). Its default path is covered by the `197d45b` record (*Hosted default-path run of the current blob*, under *Recorded executions*), evidence in `execution-evidence/2026-10-22-197d45b/`. It ran by Colab CLI 0.7.5 `colab exec -f` (scripted, not a browser Run all) on a fresh Colab Tesla T4: exit 0, 14/14 code cells, 0 error outputs, 220.9 s, input unchanged, verdict PASS. In that run the fresh-boundary reload passed and Section 10 verified both pinned digests of the `sample-artifact-synthetic-v1` asset before deserialisation. The optional-activity gate (the owner's 2026-10-22 ruling that the Section 11 activity runs once on the current blob before promotion) is satisfied by the `197d45b` optional-activity record (`RUN_ACTIVITY = True` run copy, PASS, evidence in `execution-evidence/2026-10-22-197d45b-activity/`). The earlier `fcfa6ff` record covers the previous blob `d766d7b7` and is history. The notebook stays **Candidate** until these two are recorded for the current blob:
+**Current status (2026-10-23): Candidate.** The current E2E notebook blob is `e705db6e` (`tutorials/tabpfn_classifier_colab.ipynb`, regenerated from code commit `c6e880b` and recorded at commit `9e69f88` on `fix/refusal-display`: a refused user input — the BYOD table, Section 9 rows, your own Section 10 artifact ZIP or rows — is shown as one `Refused: <file>: <reason>` line with no traceback, names the uploaded file rather than `train.csv`, and Run all stops at that cell; NOTEBOOK_SPEC 3.0 DAT19/DAT20). **Default path covered:** hosted Colab T4 run at `9e69f88` on 2026-10-23 (PASS, 14/14 code cells, 0 errors). **Optional activity covered:** a `RUN_ACTIVITY = True` run copy of the same blob at `9e69f88` on 2026-10-23 (PASS, 14/14 code cells, 0 errors). Both records are under *Recorded executions*. The `197d45b` default-path and optional-activity records cover the previous blob `7d8051f7` and are history, as is the earlier `fcfa6ff` record of blob `d766d7b7` (REL14). The notebook stays **Candidate** pending only these two:
 
 - **REL12:** a BYOD run in which one representative input is accepted through the downstream stages and one incompatible input is refused;
 - **REL2:** a browser run of the interactive journeys (BYOD upload dialog, optional-activity toggle, own-artifact ZIP); the scripted CLI runs count for the default path and the activity only.

@@ -9,7 +9,10 @@ Nothing is installed into the notebook kernel. Each stage is a separate process 
 verified snapshot under ``--weights``, the partitions and records of earlier stages under ``RUN_DIR/state`` (tables as
 pandas ``orient="table"`` JSON, so no Parquet engine is needed), and the learner-facing exports under ``--outputs``.
 In-context conditioning (``fit``) registers the support rows and is repeated by every stage that needs the model. On
-failure a stage writes ``RUN_DIR/state/<stage>.error.json``, which the notebook re-raises in the kernel.
+failure a stage writes ``RUN_DIR/state/<stage>.error.json``, which the notebook re-raises in the kernel. A user input the
+stage refuses (a BYOD table, uploaded rows, your own artifact ZIP) is not a failure (NOTEBOOK_SPEC 3.0 DAT19/DAT20): the
+stage raises ``Refused``, prints no traceback, records ``"refused": true`` with the file name and the rule, and exits with
+``REFUSED_EXIT``; the notebook then shows one ``Refused: <file>: <reason>`` line and stops at that cell.
 
 Stages: weights → data → validate → condition → report → export → reload → predict, then the closing external-artifact
 section (NOTEBOOK_SPEC 3.0 §19.1) external_artifact → external_reconstruct → external_predict, plus the optional
@@ -68,6 +71,36 @@ SAMPLE_ARTIFACT_MAX_BYTES = 512 * 1024 * 1024  # a download larger than this is 
 EXTERNAL_DIR = "external_artifact"  # under outputs/: the section's predictions and provenance (XAS6)
 EXTERNAL_SAMPLE_ROWS = 8
 SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+REFUSED_EXIT = 3  # a user input refused with a learner-facing message (DAT20); argparse already uses 2, a crash exits 1
+RERUN_SECTION_4 = "Fix the file (or the Section 4 fields) and run the Section 4 cell again."
+
+
+class Refused(ValueError):
+    """A user-supplied input that breaks the input contract (DAT19). Not a crash: no traceback is printed for it."""
+
+    def __init__(self, file: str, reason: str) -> None:
+        self.file = str(file) or "your input"
+        self.reason = str(reason).strip()
+        super().__init__(f"{self.file}: {self.reason}")
+
+
+def refusal(exc: Exception, files: dict[str, str], default: str, fix: str) -> Refused:
+    """A rejection of the learner's input as one ``Refused`` naming the file the learner supplied, not the internal
+    split name (DAT19): ``train.csv`` of a single uploaded CSV is that CSV, and a ZIP member is ``<zip>/<member>``."""
+    finding = getattr(exc, "finding", None)
+    message = finding["message"] if finding else str(exc)
+    file = default
+    for split, shown in files.items():
+        if message.startswith(split + ": "):
+            file, message = shown, message[len(split) + 2:]
+            break
+    renamed = {split: shown for split, shown in files.items() if "/" not in shown}  # a ZIP member keeps its own name
+    if renamed:
+        message = re.sub("|".join(re.escape(s) for s in sorted(renamed, key=len, reverse=True)), lambda m: renamed[m.group(0)], message)
+    if finding:
+        hint = " Set TARGET_COLUMN to the name of your label column." if finding.get("code") == "TARGET_MISSING" else ""
+        message = f"[{finding['code']}] {message} (observed: {finding.get('observed')}).{hint}"
+    return Refused(file, f"{message.rstrip()} {fix}")
 
 
 class Run:
@@ -173,17 +206,28 @@ def clear_outputs(run: Run) -> list[str]:
 
 
 def read_byod(P, path: Path) -> dict[str, Any]:
-    if not str(path) or not path.exists():
-        raise FileNotFoundError(f"BYOD_PATH {str(path)!r} does not exist in this runtime: upload the file or correct the path.")
-    if path.is_dir():
-        return P.read_dataset_dir(path)
-    if path.suffix.lower() == ".zip":
-        return P.read_dataset_zip(path)
-    if path.suffix.lower() == ".csv":
+    """The learner's dataset; anything unreadable is refused naming the file the learner supplied (DAT19/DAT20)."""
+    if str(path) in ("", ".") or not path.exists():
+        raise Refused(str(path) if str(path) not in ("", ".") else "BYOD_PATH", "does not exist in this runtime: upload the file or correct BYOD_PATH, then run the Section 4 cell again.")
+    if not (path.is_dir() or path.suffix.lower() in (".zip", ".csv")):
+        raise Refused(path.name, "BYOD must be a dataset ZIP (train.csv, optional val.csv/test.csv), a train.csv-style CSV, or a directory holding them. Choose such a file and run the Section 4 cell again.")
+    try:
+        if path.is_dir():
+            return P.read_dataset_dir(path)
+        if path.suffix.lower() == ".zip":
+            return P.read_dataset_zip(path)
         import pandas as pd
 
         return {"train.csv": pd.read_csv(path)}
-    raise ValueError(f"{path.name}: BYOD must be a dataset ZIP (train.csv, optional val.csv/test.csv), a train.csv, or a directory holding them.")
+    except (ValueError, zipfile.BadZipFile) as exc:  # pandas' parser and decoding errors are ValueErrors too
+        raise Refused(path.name, f"cannot be read as a dataset: {exc}. {RERUN_SECTION_4}") from None
+
+
+def shown_names(path: Path, frames: dict[str, Any]) -> dict[str, str]:
+    """The name the learner knows each split by: a single uploaded CSV is ``train.csv`` here (DAT19)."""
+    if path.is_file() and path.suffix.lower() == ".csv":
+        return {"train.csv": path.name}
+    return {name: f"{path.name}/{name}" for name in frames}
 
 
 def stage_weights(run: Run) -> None:
@@ -212,7 +256,7 @@ def stage_data(run: Run) -> None:
     text_columns = list(opts.get("text_columns") or [])
     split = float(opts.get("validation_split", P.DEFAULT_VALIDATION_SPLIT))
     removed = clear_outputs(run)
-    for name in ("train.json", "val.json", "test.json", "data.json", "validated.json", "condition.json", "export_reference.json"):
+    for name in ("train.json", "val.json", "test.json", "data.json", "validated.json", "condition.json", "export_reference.json", "shown_names.json"):
         (run.state / name).unlink(missing_ok=True)
     if removed:
         print({"removed_previous_outputs": removed})
@@ -221,26 +265,37 @@ def stage_data(run: Run) -> None:
         frames = read_byod(P, path)
         origin = {"type": "user-supplied dataset (BYOD)", "file": path.name}
         kind, digest_source = "BYOD", path
+        shown = shown_names(path, frames)
     else:
         zip_path = P.build_synthetic_dataset(run.state / "synthetic.zip", rows=600, features=12, classes=3, seed=SEED)
         frames = P.read_dataset_zip(zip_path)
         origin = {"type": "deterministic synthetic tutorial sample", "generator": "build_synthetic_dataset", "rows": 600, "features": 12, "classes": 3, "seed": SEED}
         kind, digest_source = "synthetic", zip_path
+        shown = {}
     header = list(map(str, frames["train.csv"].columns))
     unknown = [c for c in drop if c not in header and c not in DEFAULT_DROP_COLUMNS]
     if unknown:
-        raise ValueError(f"train.csv: DROP_COLUMNS {unknown} are not in the header {header}.")
+        error = ValueError(f"train.csv: DROP_COLUMNS {unknown} are not in the header {header}. Use the exact column names.")
+        raise refusal(error, shown, origin.get("file", ""), RERUN_SECTION_4) if use_byod else error
     drop = [c for c in drop if c in header]  # the default identifiers are simply absent from most BYOD tables
     if target in drop:
-        raise ValueError(f"DROP_COLUMNS must not contain the target column {target!r}.")
+        error = ValueError(f"train.csv: DROP_COLUMNS must not contain the target column {target!r}.")
+        raise refusal(error, shown, origin.get("file", ""), RERUN_SECTION_4) if use_byod else error
     for name, frame in frames.items():
-        check_numeric_like(frame, name, [target, *drop, *text_columns])
+        try:
+            check_numeric_like(frame, name, [target, *drop, *text_columns])
+        except ValueError as exc:
+            if use_byod:
+                raise refusal(exc, shown, origin["file"], RERUN_SECTION_4) from None
+            raise
     train, val, test = frames["train.csv"], frames.get("val.csv"), frames.get("test.csv")
     features_only = lambda f: f.drop(columns=[c for c in drop if c in f.columns]) if f is not None else None  # noqa: E731
     # Validate BEFORE any split so a renamed target or a duplicate column is a coded finding, not a KeyError (TPC-m3).
     try:
         P.validate_inputs(features_only(train), target, val=features_only(val), test=features_only(test), names=[origin["type"]])
     except P.InputRejected as exc:
+        if use_byod:
+            raise refusal(exc, shown, origin["file"], RERUN_SECTION_4) from None
         raise coded(P, exc, "dataset") from None
     split_origin = "explicit train/val/test from the dataset"
     if val is None:
@@ -249,6 +304,7 @@ def stage_data(run: Run) -> None:
     for key, frame in (("train", train), ("val", val), ("test", test)):
         if frame is not None:
             run.write_frame(f"{key}.json", frame.reset_index(drop=True))
+    run.write_state("shown_names.json", shown)
     record = {"sample_kind": kind, **origin, "dataset_sha256": sha256_file(digest_source) if digest_source.is_file() else None, "target": target, "drop_columns": drop, "text_columns": text_columns, "splits": split_origin, "rows": {"train": len(train), "val": len(val), "test": None if test is None else len(test)}}
     run.write_state("data.json", record)
     print(record)
@@ -266,15 +322,22 @@ def stage_validate(run: Run) -> None:
     test = run.read_frame("test.json", "validate") if (run.state / "test.json").is_file() else None
     strip = lambda f: f.drop(columns=drop) if f is not None else None  # noqa: E731
     print({"ceilings": {"MAX_TRAIN_ROWS": P.MAX_TRAIN_ROWS, "MAX_FEATURES": P.MAX_FEATURES, "MAX_CLASSES": P.MAX_CLASSES, "MIN_CLASSES": P.MIN_CLASSES, "MIN_ROWS_PER_CLASS": P.MIN_ROWS_PER_CLASS}, "decision_rule": P.DECISION_RULE, "model_version": P.MODEL_VERSION})
+    byod = data["sample_kind"] == "BYOD"
+    shown = run.read_state("shown_names.json", "validate") if byod else {}
     try:
         manifest = P.validate_inputs(strip(train), target, val=strip(val), test=strip(test), names=[data["type"]])
     except P.InputRejected as exc:
+        if byod:
+            raise refusal(exc, shown, data["file"], RERUN_SECTION_4) from None
         raise coded(P, exc, "dataset") from None
     unseen = [f for f in manifest["findings"] if f.get("code") == "UNSEEN_CLASSES"]
     if unseen:
         # TPC-m3: a validation/test class absent from the support rows can never be predicted and breaks log loss later.
         detail = "; ".join(f"{f['input']}: {f['observed']}" for f in unseen)
-        raise ValueError(f"[UNSEEN_CLASSES] classes absent from train.csv: {detail}. Every class in val.csv/test.csv must also occur in train.csv; re-split the data or remove those rows.")
+        error = ValueError(f"[UNSEEN_CLASSES] classes absent from train.csv: {detail}. Every class in val.csv/test.csv must also occur in train.csv; re-split the data or remove those rows.")
+        if byod:
+            raise refusal(error, shown, data["file"], RERUN_SECTION_4) from None
+        raise error
     try:
         P.validate_inputs(strip(train).rename(columns={target: "label"}), target)
     except P.InputRejected as exc:
@@ -455,14 +518,19 @@ def stage_predict(run: Run) -> None:
     cond = run.read_state("condition.json", "predict")
     reload_check = run.read_state("reload.json", "predict")
     export = run.read_state("export.json", "predict")
-    fresh = P.TabPFNClassifierPipeline.from_artifact(run.out / "artifact", device=cond["device"], expected_checkpoint_sha256=P.WEIGHTS_SHA256)
     path = run.options.get("new_data_path") or ""
     drop = data["drop_columns"]
+    for stale in (f"{STEM}_predictions.csv", f"{STEM}_result.json"):  # a refusal leaves no earlier result on disk (DAT20)
+        (run.out / stale).unlink(missing_ok=True)
+    fix = "Fix the file and run the Section 9 cell again."
     if path:
         file = Path(path)
         if not file.is_file():
-            raise FileNotFoundError(f"NEW_DATA_PATH {path!r} does not exist in this runtime.")
-        rows = pd.read_csv(file)
+            raise Refused(path, "does not exist in this runtime: upload the file or correct NEW_DATA_PATH, then run the Section 9 cell again.")
+        try:
+            rows = pd.read_csv(file)
+        except ValueError as exc:
+            raise Refused(file.name, f"cannot be read as a CSV: {exc}. {fix}") from None
         origin = f"user-supplied CSV (BYOD): {file.name}"
     else:
         rows, origin = new_rows_frame(data, val, test)
@@ -470,9 +538,13 @@ def stage_predict(run: Run) -> None:
     passthrough = [c for c in rows.columns if c in drop]
     try:
         features = P.validate_new_rows(rows.drop(columns=passthrough), v["features"], target_column=data["target"], classes=v["classes"])
-    except P.InputRejected as exc:
-        raise coded(P, exc, Path(path).name if path else "new rows") from None
-    check_numeric_like(features, Path(path).name if path else "new rows", [])
+        check_numeric_like(features, Path(path).name if path else "new rows", [])
+    except ValueError as exc:
+        if path:
+            raise refusal(exc, {"new rows": Path(path).name, Path(path).name: Path(path).name}, Path(path).name, fix) from None
+        raise coded(P, exc, "new rows") from None
+    # The rows are checked before the model is loaded, so a refused file costs no model load (DAT19).
+    fresh = P.TabPFNClassifierPipeline.from_artifact(run.out / "artifact", device=cond["device"], expected_checkpoint_sha256=P.WEIGHTS_SHA256)
     scored = fresh.predict(features)
     out = pd.concat([rows[passthrough].reset_index(drop=True), scored.drop(columns=["row_id"]).reset_index(drop=True)], axis=1) if passthrough else scored
     out.to_csv(run.out / f"{STEM}_predictions.csv", index=False)
@@ -688,20 +760,30 @@ def stage_external_artifact(run: Run) -> None:
         given = str(opts.get("zip_path") or "")
         zip_path = Path(given)
         if not given or not zip_path.is_file():
-            raise FileNotFoundError(f"ARTIFACT_ZIP_PATH {given!r} is not a file in this runtime: point it at the artifact ZIP you were given.")
+            raise Refused(given or "ARTIFACT_ZIP_PATH", "is not a file in this runtime: point ARTIFACT_ZIP_PATH at the artifact ZIP you were given, or upload it, then run this cell again.")
         expected = str(opts.get("expected_zip_sha256") or "").strip()
         if expected:
-            trust = {"trusted_digest": "verified (EXPECTED_ZIP_SHA256)", "zip_sha256": check_trusted_digest(zip_path, expected, "EXPECTED_ZIP_SHA256")}
+            try:
+                digest = check_trusted_digest(zip_path, expected, "EXPECTED_ZIP_SHA256")
+            except ValueError as exc:
+                raise Refused(zip_path.name, f"{exc} Then run this cell again.") from None
+            trust = {"trusted_digest": "verified (EXPECTED_ZIP_SHA256)", "zip_sha256": digest}
         else:
             trust = {"trusted_digest": "not supplied", "zip_sha256": sha256_file(zip_path)}
             print("No EXPECTED_ZIP_SHA256 was supplied: the checks below establish internal consistency only, not that this is the artifact you were sent. Ask the producer for the digest it printed when it exported.")
     else:
         raise ValueError(f"ARTIFACT_SOURCE must be the pinned sample or your own ZIP, got {source!r}")
-    members = check_members(P, zip_path)
-    P.safe_extract_zip(zip_path, bundle)
-    artifact = P.validate_artifact_bundle(bundle, expected_fitted_sha256=expected_fitted, expected_checkpoint_sha256=P.WEIGHTS_SHA256)
-    manifest = {k: v for k, v in artifact.items() if k not in ("verifiedSha256", "recordedModelPath")}
-    binding = check_base_model(P, manifest)
+    try:
+        members = check_members(P, zip_path)
+        P.safe_extract_zip(zip_path, bundle)
+        artifact = P.validate_artifact_bundle(bundle, expected_fitted_sha256=expected_fitted, expected_checkpoint_sha256=P.WEIGHTS_SHA256)
+        manifest = {k: v for k, v in artifact.items() if k not in ("verifiedSha256", "recordedModelPath")}
+        binding = check_base_model(P, manifest)
+    except (ValueError, RuntimeError, FileNotFoundError, zipfile.BadZipFile) as exc:
+        if source != "own":
+            raise  # the pinned sample failing these checks is an integrity error, not a refusal: keep the traceback
+        shutil.rmtree(bundle, ignore_errors=True)
+        raise Refused(zip_path.name, f"is not a usable artifact for this notebook: {exc} Use an artifact ZIP that this notebook exported in Section 8, and run this cell again.") from None
     contract = None
     if source == "pinned":
         contract = synthetic_contract(run, P)
@@ -746,24 +828,34 @@ def stage_external_predict(run: Run) -> None:
 
     import pandas as pd
 
-    P, art, manifest, serving = external_serving(run)
+    P = package(run.root)
+    art = run.read_state("external_artifact.json", "external_predict")
+    manifest = art["manifest"]
     features, classes, target = list(manifest["featureColumns"]), [str(c) for c in manifest["classes"]], manifest["targetColumn"]
     path = str(run.options.get("rows_path") or "")
+    for stale in (f"{STEM}_external_predictions.csv", f"{STEM}_external_result.json"):  # no earlier result survives a refusal (DAT20)
+        (external_out(run) / stale).unlink(missing_ok=True)
+    fix = "Fix the file and run this cell again."
     if path:
         file = Path(path)
         if not file.is_file():
-            raise FileNotFoundError(f"EXTERNAL_ROWS_PATH {path!r} does not exist in this runtime: upload the file or correct the path.")
-        rows, name, kind = pd.read_csv(file), file.name, "BYOD"
+            raise Refused(path, "does not exist in this runtime: upload the file or correct EXTERNAL_ROWS_PATH, then run this cell again.")
+        try:
+            rows, name, kind = pd.read_csv(file), file.name, "BYOD"
+        except ValueError as exc:
+            raise Refused(file.name, f"cannot be read as a CSV: {exc}. {fix}") from None
     else:
         if art["source"] != "pinned":
-            raise ValueError("The synthetic sample rows follow the pinned sample artifact's contract only. With your own artifact, set EXTERNAL_ROWS_PATH to rows that follow its manifest.")
+            raise Refused(art["zip"], "is your own artifact, and the synthetic sample rows follow the pinned sample artifact's contract only. Tick USE_OWN_ROWS (or set EXTERNAL_ROWS_PATH) with rows that follow its manifest, and run this cell again.")
         rows, name, kind = external_sample_rows(run, P), f"synthetic-test-first-{EXTERNAL_SAMPLE_ROWS}-rows.csv", "sample"
     passthrough = [c for c in rows.columns if c in DEFAULT_DROP_COLUMNS and c not in features]
     try:
         frame = P.validate_new_rows(rows.drop(columns=passthrough), features, target_column=target, classes=classes)
-    except P.InputRejected as exc:
+        frame = check_numeric_features(name, frame, feature_kinds(manifest, frame))
+    except ValueError as exc:
+        if kind == "BYOD":
+            raise refusal(exc, {"new rows": name, name: name}, name, fix) from None
         raise coded(P, exc, name) from None
-    frame = check_numeric_features(name, frame, feature_kinds(manifest, frame))
     findings = []
     try:  # a probe that breaks the artifact's schema must be refused; the finding is recorded, not swallowed
         P.validate_new_rows(frame.drop(columns=[features[0]]), features, target_column=target, classes=classes)
@@ -771,6 +863,7 @@ def stage_external_predict(run: Run) -> None:
         findings.append({"input": "missing-column-probe", "verdict": "rejected", **exc.finding})
     else:
         raise RuntimeError("The missing-column probe was accepted: input validation is not working, so no prediction is written.")
+    _P, art, manifest, serving = external_serving(run)  # loaded only after the rows passed their checks (DAT19)
     scored = serving.predict(frame)
     out = pd.concat([rows[passthrough].reset_index(drop=True), scored.drop(columns=["row_id"]).reset_index(drop=True)], axis=1) if passthrough else scored
     target_dir = external_out(run)
@@ -827,6 +920,9 @@ def main(argv: list[str] | None = None) -> int:
     error_file.unlink(missing_ok=True)
     try:
         STAGES[args.stage](run)
+    except Refused as exc:  # the learner's input was refused, not a crash: no traceback, a dedicated exit code (DAT20)
+        error_file.write_text(json.dumps({"type": "Refused", "refused": True, "file": exc.file, "message": str(exc)}), encoding="utf-8")
+        return REFUSED_EXIT
     except BaseException as exc:  # noqa: BLE001 -- every failure is reported to the kernel with its own message
         traceback.print_exc()
         error_file.write_text(json.dumps({"type": type(exc).__name__, "message": str(exc)}), encoding="utf-8")

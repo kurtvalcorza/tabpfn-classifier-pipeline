@@ -270,7 +270,7 @@ def test_m3_renamed_target_in_a_train_only_zip_is_a_coded_finding(tmp_path) -> N
     frames = _synthetic(tmp_path)
     path = _zip(tmp_path / "renamed.zip", {"train.csv": frames["train.csv"].rename(columns={"target": "label"})})
     run = _run(tmp_path / "run", tmp_path / "outputs", {"use_byod": True, "byod_path": str(path), "target_column": "target"})
-    with pytest.raises(ValueError, match=r"\[TARGET_MISSING\] train\.csv: target column 'target' not present .*Set TARGET_COLUMN"):
+    with pytest.raises(ValueError, match=r"^renamed\.zip/train\.csv: \[TARGET_MISSING\] target column 'target' not present .*Set TARGET_COLUMN"):
         _quiet(STAGES.stage_data, run)
     run.options["target_column"] = "label"
     _quiet(STAGES.stage_data, run)
@@ -285,7 +285,7 @@ def test_m3_unseen_validation_class_is_refused_with_its_code(tmp_path) -> None:
     path = _zip(tmp_path / "unseen.zip", {"train.csv": frames["train.csv"], "val.csv": val, "test.csv": frames["test.csv"]})
     run = _run(tmp_path / "run", tmp_path / "outputs", {"use_byod": True, "byod_path": str(path)})
     _quiet(STAGES.stage_data, run)
-    with pytest.raises(ValueError, match=r"\[UNSEEN_CLASSES\] classes absent from train\.csv: val\.csv: \['class_9'\]"):
+    with pytest.raises(ValueError, match=r"^unseen\.zip: \[UNSEEN_CLASSES\] classes absent from train\.csv: val\.csv: \['class_9'\]"):
         _quiet(STAGES.stage_validate, run)
     assert not (run.out / "tabpfn_classifier_input_manifest.json").exists()
 

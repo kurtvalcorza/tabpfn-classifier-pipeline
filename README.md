@@ -147,10 +147,11 @@ Static gates (also run by CI): `ruff check .`, `pytest -m "not integration"`, `p
 
 ## Release status
 
-**Candidate — the current E2E blob `7d8051f7` (a text-only regeneration from `95d9e34`) has a recorded hosted default-path run and a
-recorded hosted optional-activity run (`RUN_ACTIVITY = True`), both Colab CLI scripted, fresh T4, commit `197d45b`, 2026-10-22,
-PASS, 14/14 code cells; a BYOD run (one input accepted, one refused; REL12) and a browser run of the interactive journeys (REL2)
-are still required before promotion** (`STATUS.md`). The
+**Candidate — the current E2E blob `e705db6e` (regenerated from `c6e880b`, which shows a refused user input as one `Refused:` line;
+DAT19/DAT20) has its default path and its optional activity recorded by hosted Colab T4 runs at `9e69f88` (2026-10-23, PASS,
+14/14 code cells, 0 errors each). The runs at `197d45b` (2026-10-22, PASS) cover the previous blob `7d8051f7` and are history
+(REL14). Pending only a BYOD run (one input accepted, one refused; REL12) and a browser run of the interactive journeys (REL2)
+before promotion** (`STATUS.md`). The
 standalone notebook passes static validation and the generator parity checks; its clean-runtime runs are recorded — and
 gate promotion — in `docs/release-verification.md`.
 
