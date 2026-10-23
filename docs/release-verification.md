@@ -189,6 +189,27 @@ replaced by `<local-run-dir>` before the first commit:
 | `tabpfn_classifier_colab_9e69f88_colab-cli-t4_activity_run_copy.ipynb` | `e9d59aef2f2a891f18ba616d5d97b9f48e34ae75e66c224225b7385ee22564ab` | unchanged (no local path) |
 | `tabpfn_classifier_colab_9e69f88_colab-cli-t4_activity_run_summary.json` | `3babac27e56c93db90bb29ba08b8a1f1a31fe2c4a8c814a559913bf74be85a2c` | unchanged (no local path) |
 
+### Serialization scan of the pinned sample artifact (2026-10-23)
+
+ARTIFACT_SPEC 2.0 (ml-worker#90) SER9 and SER13: `model.ckpt` is a byte copy of the upstream code-capable checkpoint and
+`model.tabpfn_fit` is TabPFN's own fitted-state format, which has no faithful non-code-executing equivalent, so both stay
+pickle-based with a trust note (SER6: "Artifact contract and trust boundary" in
+[`tutorials/README.md`](../tutorials/README.md)) and a recorded static scan. The release asset
+`sample-artifact-synthetic-v1/tabpfn_classifier_artifact.zip` was downloaded on 2026-10-23; its SHA-256
+(`8fe248e2f9841c452316d07ee3e88e5fcde89ec458ff630954028b1c22df1054`) matches the pinned value. It was extracted and scanned;
+nothing was loaded.
+
+- **`model.ckpt`:** picklescan 1.0.5 (`-g`) reads it to the end: only `collections.OrderedDict`, `torch.FloatStorage` and
+  `torch._utils._rebuild_tensor_v2`, all innocuous (a plain tensor state dict).
+- **`model.tabpfn_fit`:** a ZIP of `init_params.json` and two joblib pickles. picklescan stops partway through both joblib files
+  (exit code 2) because joblib writes raw array bytes between pickle instructions, so its partial counts (0 dangerous, 22
+  suspicious) are not a complete scan. A restricted-unpickler inventory (`joblib_globals.py`: joblib's own reader, with every
+  global outside numpy and joblib replaced by an inert stub, so no referenced callable runs) parsed both files to the end. The
+  globals are numpy (5), joblib (1), sklearn (5, including `FunctionTransformer`), `builtins.slice` and TabPFN preprocessing
+  classes (28). None names an operating-system, process, network, or `eval`/`exec`/`getattr` callable.
+- **Evidence:** `docs/execution-evidence/2026-10-23/ser13-sample-artifact-scan/` holds the report (`scan-report.txt`, local
+  scan paths replaced by `<scan-dir>`) and the two scripts that produced it.
+
 ### Local lock-only drives (not clean-runtime evidence)
 
 Code cells driven in order by a plain-CPython stand-in kernel on Linux x86_64 (WSL2), CPU only (`CUDA_VISIBLE_DEVICES=-1`), inside each notebook's own isolated hash-locked uv environment (CPython 3.12.12; torch 2.11.0, tabpfn 8.1.0, numpy 2.5.3, pandas 2.3.2, scikit-learn 1.9.0; 63 locked packages), default form values. The checkpoint was copied in from a local checkout and digest-verified (`d0d865d5…`), so the Hub download was not exercised; no notebook kernel, no Colab.
