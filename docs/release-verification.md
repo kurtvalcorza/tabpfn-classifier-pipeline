@@ -122,7 +122,7 @@ with the deterministic ZIP writer. The pin stays valid because it names one reco
 | `tabpfn_classifier_colab_fcfa6ff_colab-cli-t4_exec.log` | `a6dc465fcc8efc8f5918f38f82be418579172a9c36a001f4f8556820a9782668` | `e827b1f4dca093669219a5c4f4a42e78932842724f894d7bfcc01cf81145c366` |
 | `tabpfn_classifier_colab_fcfa6ff_colab-cli-t4_suite.log` | `3c833899455cf92060665079b6e41e4d7e4e61575a087c1e1f2cda0f6722a292` | `ca55c93e17860557f1214414717fb15e576d7f3159a1f06213aad15b0d4c8147` |
 
-**Hosted default-path run of the current blob (2026-10-22, `197d45b` / blob `7d8051f712ad`).** Colab CLI 0.7.5 `colab exec -f`
+**Hosted default-path run of blob `7d8051f712ad` (2026-10-22, `197d45b`; the current blob until `c6e880b`, now history).** Colab CLI 0.7.5 `colab exec -f`
 (a scripted run, not a browser Run all) on a fresh Colab Tesla T4, default path of `tutorials/tabpfn_classifier_colab.ipynb`
 at `197d45b`, executed as committed, started 2026-10-22T13:21:05Z, wall 220.9 s, exit 0, sequential, input unchanged, 14/14
 code cells, 0 errors, verdict PASS. Evidence: `docs/execution-evidence/2026-10-22-197d45b/`. Printed: validation accuracy 0.9778 / log loss
@@ -137,7 +137,7 @@ by `<local-run-dir>` before the first commit:
 | `tabpfn_classifier_colab_197d45b_colab-cli-t4_exec.log` | `1f4e670511a9ed976d06c9dc76693269ca8dd8afe2b812392a276d8c7bcdcdef` | `dd55e5f6aabac33c34f9ffea5e207b6d73a166672c98155cbe995e4fe0ba4395` (2 replacements) |
 | `tabpfn_classifier_colab_197d45b_colab-cli-t4_run_summary.json` | `6137e1353f5bd320a53075bca09213e947fdc3a7c4f09895a89b7f7009836e6c` | unchanged (no local path) |
 
-**Optional-activity run of the current blob (2026-10-22, `197d45b` / blob `7d8051f712ad`, `RUN_ACTIVITY = True`).** A run copy of
+**Optional-activity run of blob `7d8051f712ad` (2026-10-22, `197d45b`, `RUN_ACTIVITY = True`; history).** A run copy of
 committed blob `7d8051f7` with one override, `RUN_ACTIVITY = False` → `True` (run copy blob `586d5f40fe54`, SHA-256
 `1d36ec2ecbff48c3991f0a58a7a2da2e243093a20f1a12d59e595d6dc5d08d47`; it differs from the committed blob only in that assignment
 literal and is committed beside the evidence as `…_activity_run_copy.ipynb`), run by Colab CLI 0.7.5 `colab exec -f` (scripted,
@@ -182,7 +182,7 @@ clean Colab record, are both still required before either notebook is marked rel
 
 ## Current status
 
-**Current status (2026-10-22): Candidate.** The current E2E notebook blob is `7d8051f7` (`tutorials/tabpfn_classifier_colab.ipynb`, regenerated from template commit `95d9e34` on `docs/rel14-status`; a text-only change that drops the notebook's own run-status claims). Its default path is covered by the `197d45b` record (*Hosted default-path run of the current blob*, under *Recorded executions*), evidence in `execution-evidence/2026-10-22-197d45b/`. It ran by Colab CLI 0.7.5 `colab exec -f` (scripted, not a browser Run all) on a fresh Colab Tesla T4: exit 0, 14/14 code cells, 0 error outputs, 220.9 s, input unchanged, verdict PASS. In that run the fresh-boundary reload passed and Section 10 verified both pinned digests of the `sample-artifact-synthetic-v1` asset before deserialisation. The optional-activity gate (the owner's 2026-10-22 ruling that the Section 11 activity runs once on the current blob before promotion) is satisfied by the `197d45b` optional-activity record (`RUN_ACTIVITY = True` run copy, PASS, evidence in `execution-evidence/2026-10-22-197d45b-activity/`). The earlier `fcfa6ff` record covers the previous blob `d766d7b7` and is history. The notebook stays **Candidate** until these two are recorded for the current blob:
+**Current status (2026-10-23): Candidate.** The current E2E notebook blob is `e705db6e` (`tutorials/tabpfn_classifier_colab.ipynb`, regenerated from code commit `c6e880b` on `fix/refusal-display`: a refused user input — the BYOD table, Section 9 rows, your own Section 10 artifact ZIP or rows — is shown as one `Refused: <file>: <reason>` line with no traceback, names the uploaded file rather than `train.csv`, and Run all stops at that cell; NOTEBOOK_SPEC 3.0 DAT19/DAT20). It has no recorded hosted run until the orchestrator records one (REL14). The `197d45b` default-path and optional-activity records (under *Recorded executions*) cover the previous blob `7d8051f7` and are history, as is the earlier `fcfa6ff` record of blob `d766d7b7`. The notebook stays **Candidate** until a hosted default-path run and an optional-activity run (the owner's 2026-10-22 ruling) of the current blob and these two are recorded for it:
 
 - **REL12:** a BYOD run in which one representative input is accepted through the downstream stages and one incompatible input is refused;
 - **REL2:** a browser run of the interactive journeys (BYOD upload dialog, optional-activity toggle, own-artifact ZIP); the scripted CLI runs count for the default path and the activity only.
