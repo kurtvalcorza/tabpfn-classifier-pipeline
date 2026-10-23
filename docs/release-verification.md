@@ -191,30 +191,31 @@ replaced by `<local-run-dir>` before the first commit:
 
 ### Serialization scan of the pinned sample artifact (2026-10-23, retroactive)
 
-ARTIFACT_SPEC 2.0 (ml-worker#90) SER9 and SER13: `model.ckpt` is a byte copy of the upstream code-capable checkpoint and
-`model.tabpfn_fit` is TabPFN's own fitted-state format, which has no faithful non-code-executing equivalent, so both stay
-pickle-based with a trust note (SER6: "Artifact contract and trust boundary" in
-[`tutorials/README.md`](../tutorials/README.md)) and a recorded scan. SER13 asks for the scan **before** publication; this asset
-was published on 2026-10-22, before 2.0 existed, so this is a **retroactive** scan of the published bytes. The next sample
-artifact is to be scanned before upload and published only at the digest that passed.
+ARTIFACT_SPEC 2.0 (ml-worker#90): SER9 (b) for `model.ckpt`, a byte copy of the upstream code-capable checkpoint kept so the bundle can be checked against the pinned upstream identity; SER9 (a) for `model.tabpfn_fit`, TabPFN's own fitted-state format, which has no faithful non-code-executing equivalent. Both need a recorded trust note (SER6: "Artifact contract and trust boundary" in [`tutorials/README.md`](../tutorials/README.md)) and a scan with an acceptable outcome (SER13). SER13 asks for the scan **before** publication; this asset was published on
+2026-10-22, before 2.0 existed, so this is a **retroactive** scan of the published bytes, not the pre-publication control. The
+next sample artifact is to be scanned before upload and published only at the digest that passed.
 
-The release asset `sample-artifact-synthetic-v1/tabpfn_classifier_artifact.zip` was downloaded on 2026-10-23; its SHA-256
-(`8fe248e2f9841c452316d07ee3e88e5fcde89ec458ff630954028b1c22df1054`) matches the pinned value. `scan.sh` extracted it and
-`model.tabpfn_fit`; `model.ckpt` is a PyTorch zip that picklescan reads in place, so each payload was scanned once.
+The release asset `sample-artifact-synthetic-v1/tabpfn_classifier_artifact.zip` was downloaded on 2026-10-23; its SHA-256 (`8fe248e2f9841c452316d07ee3e88e5fcde89ec458ff630954028b1c22df1054`) matches the pinned value. `scan.py`
+(picklescan 1.0.5, joblib 1.6.0, numpy 2.5.4, Python 3.13) extracted it with member-path checks, reached every nested archive,
+and judged each pickle file on its own: **dangerous** if any global is dangerous, **incomplete** if no recorded method read the
+whole file, otherwise **clean**. PyTorch zips are scanned in place, so each payload is scanned once.
 
-- **`model.ckpt`:** picklescan 1.0.5 (`-g`) reads it to the end: only `collections.OrderedDict`, `torch.FloatStorage` and
-  `torch._utils._rebuild_tensor_v2`, all innocuous (a plain tensor state dict).
-- **`model.tabpfn_fit`:** a ZIP of `init_params.json` and two joblib pickles. picklescan stops partway through both joblib
-  files (exit code 2) because joblib writes raw array bytes between pickle instructions, so its partial counts (0 dangerous,
-  22 suspicious) are not a complete scan. SER13's second recorded method closes the gap: `joblib_globals.py` is a **restricted
-  load**, not a static parse. It reads both files with joblib's own reader (joblib 1.6.0, numpy 2.5.4, pinned), lets only
-  numpy's array and scalar rebuilders, `numpy.dtype` and joblib's `NumpyArrayWrapper` run, and replaces every other global
-  with an inert stub. It parsed both files to the end. The stubbed globals are numpy (`float64`), sklearn (5, including
-  `FunctionTransformer`), `builtins.slice` and TabPFN preprocessing classes (28). None names an operating-system, process,
-  network, or `eval`/`exec`/`getattr` callable. `scan_status=0`.
-- **Evidence:** `docs/execution-evidence/2026-10-23/ser13-sample-artifact-scan/` holds `scan-report.txt` exactly as `scan.sh`
-  wrote it except that `make_evidence.py` replaced local scan paths with `<scan-dir>`, plus the three scripts. `scan.sh` exits
-  with the combined status (0 clean, 1 dangerous, 2 incomplete).
+The two joblib files interleave raw numpy bytes with pickle instructions, so picklescan cannot read them to the end. For those, `scan.py` runs a **restricted load**: joblib's own reader with `find_class` replaced, so only numpy's array and scalar rebuilders, `numpy.dtype` and joblib's `NumpyArrayWrapper` are real and run; every other global is an inert stub, recorded, and classified with picklescan's own tables. Payloads of `torch.storage._load_from_bytes` are saved as files and scanned like any other file, never loaded.
+
+| File | Kind | Verdict |
+|---|---|---|
+| `model.tabpfn_fit` | archive | extracted |
+| `model.ckpt` | pytorch-zip | clean |
+| `model.tabpfn_fit.x/fitted_attrs.joblib` | joblib | clean |
+| `model.tabpfn_fit.x/executor_state.joblib` | joblib | clean |
+
+- **Result:** 3 pickle files; clean=3 dangerous=0 incomplete=0; `scan_status=0`. Dangerous globals: none.
+- **Globals (distinct, all files):** 43, by top-level package: tabpfn (28), numpy (5), sklearn (5), torch (2), builtins (1), collections (1), joblib (1). The per-file lists with picklescan's
+  classification are in the report.
+- **Evidence:** `docs/execution-evidence/2026-10-23/ser13-sample-artifact-scan/` holds `scan-report.txt` exactly as `scan.py`
+  wrote it (it records only paths inside the asset), `scan.py`, and `test_scan.py`, its regression tests (dangerous globals
+  behind joblib buffers or beside joblib files, gzipped and nested pickles, nested archives, bad archives and escaping paths).
+  `scan.py` exits 0 clean, 1 dangerous, 2 incomplete, 3 could not scan.
 
 ### Local lock-only drives (not clean-runtime evidence)
 
