@@ -521,55 +521,53 @@ sha256=8fe248e2f9841c452316d07ee3e88e5fcde89ec458ff630954028b1c22df1054
     256 archive/data/509
     2 archive/version
     40 archive/.data/serialization_id
+   (PyTorch zip: scanned in place by picklescan, not extracted)
 -- nested zip: model.tabpfn_fit
     682 init_params.json
     13764 fitted_attrs.joblib
     188108 executor_state.joblib
 -- picklescan 1.0.5
-ERROR: parsing pickle in <scan-dir>/model.tabpfn_fit.x\executor_state.joblib: at position 1221, opcode b'\n' unknown
-ERROR: parsing pickle in <scan-dir>/model.tabpfn_fit.x\fitted_attrs.joblib: at position 4551, opcode b'\x08' unknown
+ERROR: parsing pickle in <scan-dir>/x/model.tabpfn_fit.x\executor_state.joblib: at position 1221, opcode b'\n' unknown
+ERROR: parsing pickle in <scan-dir>/x/model.tabpfn_fit.x\fitted_attrs.joblib: at position 4551, opcode b'\x08' unknown
 ----------- SCAN SUMMARY -----------
-Scanned files: 4
+Scanned files: 3
 Infected files: 0
 Suspicious globals: 22
 Dangerous globals: 0
 All globals found:
-  * collections.OrderedDict - innocuous
   * torch._utils._rebuild_tensor_v2 - innocuous
   * torch.FloatStorage - innocuous
   * collections.OrderedDict - innocuous
-  * torch._utils._rebuild_tensor_v2 - innocuous
-  * torch.FloatStorage - innocuous
-  * tabpfn.preprocessing.configs.ClassifierEnsembleConfig - suspicious
-  * numpy.dtype - innocuous
-  * tabpfn.preprocessing.configs.PreprocessorConfig - suspicious
   * tabpfn.inference.InferenceEngineCachePreprocessing - suspicious
-  * tabpfn.preprocessing.ensemble.TabPFNEnsemblePreprocessor - suspicious
   * numpy._core.multiarray.scalar - suspicious
-  * joblib.numpy_pickle.NumpyArrayWrapper - suspicious
   * numpy.ndarray - innocuous
-  * ClassifierEvalMetrics.dtype - suspicious
-  * tabpfn.preprocessing.steps.preprocessing_helpers.OrderPreservingColumnTransformer - suspicious
+  * joblib.numpy_pickle.NumpyArrayWrapper - suspicious
+  * tabpfn.preprocessing.ensemble.TabPFNEnsemblePreprocessor - suspicious
+  * tabpfn.preprocessing.configs.ClassifierEnsembleConfig - suspicious
+  * tabpfn.preprocessing.configs.PreprocessorConfig - suspicious
+  * numpy.dtype - innocuous
   * tabpfn.inference_config.InferenceConfig - suspicious
-  * sklearn.preprocessing._encoders.OrdinalEncoder - suspicious
-  * tabpfn.inference_tuning.ClassifierEvalMetrics - suspicious
+  * sklearn.preprocessing._label.LabelEncoder - suspicious
   * None.FeatureModality - suspicious
+  * tabpfn.inference_tuning.ClassifierEvalMetrics - suspicious
+  * numpy.dtype - innocuous
+  * tabpfn.preprocessing.datamodel.FeatureSchema - suspicious
+  * sklearn.preprocessing._encoders.OrdinalEncoder - suspicious
+  * numpy.ndarray - innocuous
+  * builtins.slice - suspicious
+  * tabpfn.preprocessing.configs.PreprocessorConfig - suspicious
+  * ClassifierEvalMetrics.dtype - suspicious
+  * joblib.numpy_pickle.NumpyArrayWrapper - suspicious
+  * None.Feature - suspicious
   * numpy._core.multiarray._reconstruct - innocuous
+  * tabpfn.preprocessing.label_encoder.TabPFNLabelEncoder - suspicious
+  * sklearn.compose._column_transformer.make_column_selector - suspicious
+  * tabpfn.preprocessing.steps.preprocessing_helpers.OrderPreservingColumnTransformer - suspicious
   * numpy.float64 - suspicious
   * sklearn.preprocessing._function_transformer.FunctionTransformer - suspicious
-  * joblib.numpy_pickle.NumpyArrayWrapper - suspicious
-  * numpy.ndarray - innocuous
-  * sklearn.compose._column_transformer.make_column_selector - suspicious
-  * None.Feature - suspicious
-  * tabpfn.preprocessing.datamodel.FeatureSchema - suspicious
-  * tabpfn.preprocessing.label_encoder.TabPFNLabelEncoder - suspicious
-  * builtins.slice - suspicious
-  * numpy.dtype - innocuous
-  * tabpfn.preprocessing.configs.PreprocessorConfig - suspicious
-  * sklearn.preprocessing._label.LabelEncoder - suspicious
 picklescan_exit=2
 -- restricted-unpickler global inventory (joblib_globals.py)
-== <scan-dir>/model.tabpfn_fit.x/executor_state.joblib
+== <scan-dir>/x/model.tabpfn_fit.x/executor_state.joblib
    parsed
    stub  builtins.slice x1
    allow joblib.numpy_pickle.NumpyArrayWrapper x1
@@ -604,7 +602,7 @@ picklescan_exit=2
    stub  tabpfn.preprocessing.torch.torch_soft_clip_outliers.TorchSoftClipOutliers x1
    stub  tabpfn.preprocessing.torch.torch_squashing_scaler.TorchSquashingScaler x1
    stub  tabpfn.preprocessing.torch.torch_svd.TorchSafeStandardScaler x1
-== <scan-dir>/model.tabpfn_fit.x/fitted_attrs.joblib
+== <scan-dir>/x/model.tabpfn_fit.x/fitted_attrs.joblib
    parsed
    stub  builtins.slice x1
    allow joblib.numpy_pickle.NumpyArrayWrapper x1
@@ -633,3 +631,5 @@ picklescan_exit=2
    stub  tabpfn.preprocessing.steps.preprocessing_helpers.OrderPreservingColumnTransformer x1
    stub  tabpfn.preprocessing.steps.remove_constant_features_step.RemoveConstantFeaturesStep x1
    stub  tabpfn.preprocessing.steps.reshape_feature_distribution_step.ReshapeFeatureDistributionsStep x1
+inventory_exit=0
+scan_status=0

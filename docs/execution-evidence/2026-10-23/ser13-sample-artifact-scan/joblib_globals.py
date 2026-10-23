@@ -1,10 +1,13 @@
-"""List every global a joblib file references without executing any of them.
+"""List every global a joblib file references, by a restricted load (not a static parse).
 
-joblib interleaves raw numpy buffers with pickle opcodes, so pure static
-parsers (picklescan, pickletools) stop at the first buffer. This walks the
-file with joblib's own unpickler, but find_class returns an inert stub for
-every global outside a small numpy/joblib allowlist, and object-dtype arrays
-are read with the same restricted unpickler. Run with python -I.
+joblib interleaves raw numpy buffers with pickle opcodes, so pure static parsers
+(picklescan, pickletools) stop at the first buffer. This reads the file with joblib's
+own unpickler, but find_class returns an inert stub for every global outside ALLOW.
+Only the ALLOW entries run: numpy's array and scalar rebuilders, numpy.dtype, and
+joblib's NumpyArrayWrapper, which reads the raw array bytes. torch.storage._load_from_bytes
+payloads are saved to --dump-nested for a separate static scan, not loaded. Object-dtype
+arrays are read with the same restricted unpickler. Pinned: joblib 1.6.0, numpy 2.5.4
+(it relies on joblib.numpy_pickle internals). Run with python -I.
 """
 import collections
 import pickle
@@ -38,7 +41,25 @@ class Stub:
         return Stub()
 
 
+NESTED_DIR = None  # set by --dump-nested DIR: payloads of torch.storage._load_from_bytes are saved, not loaded
+nested = []
+
+
+def _capture_bytes(data, *args, **kwargs):
+    if NESTED_DIR is not None and isinstance(data, bytes | bytearray):
+        import hashlib
+        import pathlib
+
+        digest = hashlib.sha256(data).hexdigest()
+        out = pathlib.Path(NESTED_DIR) / f"nested-{digest[:16]}.pt"
+        out.write_bytes(bytes(data))
+        nested.append((out.name, len(data), digest))
+    return Stub()
+
+
 def make_stub(module, name):
+    if (module, name) == ("torch.storage", "_load_from_bytes"):
+        return _capture_bytes
     return type(f"Stub[{module}.{name}]", (Stub,), {})
 
 
@@ -70,10 +91,14 @@ class _PickleShim:
         return RestrictedPlain(fh).load()
 
 
-_probe = pickle.Unpickler(open(sys.argv[1], "rb"))
+args = sys.argv[1:]
+if args[:1] == ["--dump-nested"]:
+    NESTED_DIR, args = args[1], args[2:]
+_probe = pickle.Unpickler(open(args[0], "rb"))
 jnp.pickle = _PickleShim()
 
-for path in sys.argv[1:]:
+incomplete = False
+for path in args:
     seen.clear()
     with open(path, "rb") as fh:
         try:
@@ -81,7 +106,11 @@ for path in sys.argv[1:]:
             status = "parsed"
         except Exception as exc:  # report, never raise: this is an audit
             status = f"stopped: {type(exc).__name__}: {exc}"
+            incomplete = True
     print(f"== {path}\n   {status}")
     for (module, name), count in sorted(seen.items()):
         tag = "allow" if (module, name) in ALLOW else "stub"
         print(f"   {tag:5} {module}.{name} x{count}")
+for name, size, digest in nested:
+    print(f"== nested payload {name}: {size} bytes, sha256={digest} (saved, not loaded)")
+sys.exit(2 if incomplete else 0)
