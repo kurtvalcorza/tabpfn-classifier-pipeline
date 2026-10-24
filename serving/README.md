@@ -3,15 +3,15 @@
 A DIMER training run produces two complementary files:
 
 - `model.tabpfn_fit` — fitted estimator/preprocessing/in-context state;
-- `model.ckpt` — the foundation/fine-tuned neural-network weights.
+- `model.safetensors` — the foundation/fine-tuned neural-network weights (bundle format v2; a v1 bundle carries `model.ckpt` instead, deprecated).
 
 TabPFN's upstream fitted-state format intentionally omits foundation weights. Its normal loader reconstructs the estimator using the `model_path` recorded when the fitted state was saved. That path may refer to the training container's cache and therefore may not exist after DIMER relocates the artifact.
 
 Use [`load_artifact.py`](load_artifact.py) for DIMER serving. It:
 
-1. locates `model.tabpfn_fit` and `model.ckpt` in the deployed artifact directory;
+1. locates `model.tabpfn_fit` and the weights in the deployed artifact directory: `model.safetensors` (v2), or a v1 `model.ckpt`, which it reads once with `torch.load(weights_only=True)` into a temporary safetensors file and warns about (`DeprecationWarning`); a directory with both, or a manifest that disagrees with the files, is refused;
 2. creates a temporary copy of the fitted-state archive;
-3. rewrites only `init_params.json:model_path` to the deployed companion checkpoint;
+3. rewrites only `init_params.json:model_path` to the safetensors weights;
 4. calls TabPFN's official `load_fitted_tabpfn_model` on the temporary archive;
 5. leaves the persisted artifact unchanged.
 

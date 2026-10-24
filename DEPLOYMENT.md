@@ -163,7 +163,7 @@ Acceptance criteria:
 - the selected device is recorded in `metadata.device`;
 - validation metrics are present;
 - test metrics are present when `test.csv` is supplied;
-- `artifacts/model.tabpfn_fit`, `artifacts/model.ckpt`, and `artifacts/artifact_manifest.json` exist (plus `evaluation/report.json`, `logs/run-summary.json`, `progress/epoch_*.json`);
+- `artifacts/model.tabpfn_fit`, `artifacts/model.safetensors`, and `artifacts/artifact_manifest.json` (bundle format v2, `DIMER_CONTRACT.md`) exist, and no `.ckpt` / `.pt` / `.pth` file is left anywhere in the output (plus `evaluation/report.json`, `logs/run-summary.json`, `progress/epoch_*.json`);
 - dataset hash is recorded;
 - explicitly mounted model checkpoint is hashed when configured;
 - callback behavior is correct.
@@ -172,7 +172,7 @@ Acceptance criteria:
 
 In a clean environment with the same supported TabPFN package version:
 
-1. Load `artifacts/model.tabpfn_fit` with TabPFN's fitted-model loading utility (its companion `artifacts/model.ckpt` sits beside it).
+1. Load `artifacts/model.tabpfn_fit` with TabPFN's fitted-model loading utility (its companion `artifacts/model.safetensors` sits beside it; `serving/load_artifact.py` rewrites the archive's `model_path` to it).
 2. Load a fixed inference fixture.
 3. Run predictions and probabilities.
 4. Compare them with the predictions captured immediately after training.

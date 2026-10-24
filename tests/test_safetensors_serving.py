@@ -71,9 +71,9 @@ def test_ensure_converted_replaces_a_tampered_file_through_the_pinned_conversion
     assert calls == [{"source": tmp_path / api.WEIGHTS_FILE, "target": tmp_path / api.CONVERTED_FILE, "expected_sha256": api.WEIGHTS_SHA256, "source_name": api.WEIGHTS_FILE, "expected_converted_sha256": api.CONVERTED_SHA256}]
 
 
-def test_save_artifact_refuses_to_bundle_the_safetensors_file_as_model_ckpt(tmp_path: Path) -> None:
-    pipe = api.TabPFNClassifierPipeline(weights_path=tmp_path / api.CONVERTED_FILE, feature_columns=["a"], classes=["x", "y"], _model=object())
-    with pytest.raises(ValueError, match="byte copy of the source checkpoint"):
+def test_save_artifact_refuses_to_re_export_a_v1_pickle_checkpoint(tmp_path: Path) -> None:
+    pipe = api.TabPFNClassifierPipeline(weights_path=tmp_path / api.LEGACY_CHECKPOINT_NAME, feature_columns=["a"], classes=["x", "y"], _model=object())
+    with pytest.raises(ValueError, match="not a safetensors file"):
         pipe.save_artifact(tmp_path / "bundle", saver=lambda model, path: None)
 
 
@@ -152,7 +152,7 @@ def test_served_safetensors_equals_the_pinned_checkpoint(tmp_path: Path, monkeyp
         raise AssertionError("torch.load called on the safetensors serving path")
 
     pipe = api.TabPFNClassifierPipeline.from_pretrained(device="cpu", weights_dir=weights)
-    assert pipe.weights_path == served and pipe.checkpoint_path == weights / api.WEIGHTS_FILE
+    assert pipe.weights_path == served
     monkeypatch.setattr(torch, "load", refuse)
     pipe.fit(train[features], train["target"])
     proba = pipe.predict_proba(val[features])

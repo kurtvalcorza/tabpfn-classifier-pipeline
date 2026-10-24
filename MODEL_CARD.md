@@ -216,7 +216,7 @@ When a concrete local checkpoint path is available, the fine-tuner records its S
 A successful run writes, under `DIMER_OUTPUT_DIR/artifacts/`:
 
 - `model.tabpfn_fit` — fitted estimator state, saved with TabPFN's fitted-model serialization utility.
-- `model.ckpt` — TabPFN model weights/checkpoint, saved with TabPFN's model serialization utility.
+- `model.safetensors` — TabPFN model weights in tabpfn's safetensors layout (bundle format v2, `DIMER_CONTRACT.md`): the `.ckpt` tabpfn's model serialization utility writes is read once with `weights_only=True`, converted and deleted. Older v1 artifacts carry `model.ckpt`; they stay readable with `weights_only=True` and a deprecation warning.
 - `artifact_manifest.json` — target column, ordered feature columns, class labels, and artifact names.
 
 Alongside `artifacts/`, the run also writes `evaluation/report.json`, `logs/run-summary.json`, and `progress/epoch_*.json`, plus the `result.json` envelope (see `CONTRACT.md`). `result.json` declares `artifacts.modelArtifact` (path relative to `/data`) for a downstream export step to resolve.

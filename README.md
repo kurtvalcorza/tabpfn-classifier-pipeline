@@ -138,7 +138,7 @@ frames = read_dataset_zip(build_synthetic_dataset("synthetic.zip"))
 manifest = validate_inputs(frames["train.csv"], "target", val=frames["val.csv"])  # raises InputRejected
 pipe.fit(X_train, y_train, target_column="target")           # in-context: no gradient update
 metrics = pipe.evaluate(X_val, y_val)
-pipe.save_artifact("artifact")                               # model.tabpfn_fit + model.ckpt + artifact_manifest.json
+pipe.save_artifact("artifact")                               # model.tabpfn_fit + model.safetensors + artifact_manifest.json (bundle format v2)
 fresh = TabPFNClassifierPipeline.from_artifact("artifact")            # validates the bundle, then reloads
 ```
 
@@ -147,8 +147,8 @@ Static gates (also run by CI): `ruff check .`, `pytest -m "not integration"`, `p
 
 ## Release status
 
-**Candidate — the current E2E blob `020eaa85` (regenerated from `3b451d9`, which serves the model from the pinned safetensors conversion of the checkpoint; the guard of `057ab9d` against a pickle load without `weights_only` stays) ran its default path and, in a `RUN_ACTIVITY = True` run copy, the optional activity on fresh hosted Colab T4 sessions at `b12ca85` (2026-10-24, PASS, 14/14 code cells each). The runs at
-`641152f` of blob `41dc2a68`, at `9e69f88` of blob `e705db6e` and at `197d45b` of blob `7d8051f7` are history (REL14). A
+**Candidate — the current E2E blob `dd694637` (regenerated from `b0154d1`: bundle format v2 with `model.safetensors`, see `DIMER_CONTRACT.md`; stacked on `3b451d9`, which serves the model from the pinned safetensors conversion of the checkpoint; the guard of `057ab9d` against a pickle load without `weights_only` stays) ran its default path and, in a `RUN_ACTIVITY = True` run copy, the optional activity on fresh hosted Colab T4 sessions at `f3a35be` (2026-10-24, PASS, 14/14 code cells each). The runs at
+`b12ca85` of blob `020eaa85`, at `641152f` of blob `41dc2a68`, at `9e69f88` of blob `e705db6e` and at `197d45b` of blob `7d8051f7` are history (REL14). A
 BYOD run (one input accepted, one refused; REL12) and a
 browser run of the interactive journeys (REL2) are required before promotion** (`STATUS.md`). The
 standalone notebook passes static validation and the generator parity checks; its clean-runtime runs are recorded — and
@@ -376,7 +376,7 @@ A successful run writes the DIMER artifact layout under the run's output directo
 /data/fine-tuning/<run_id>/
 ├── artifacts/
 │   ├── model.tabpfn_fit         fitted estimator (foundation weights omitted from this archive)
-│   ├── model.ckpt               foundation / fine-tuned checkpoint
+│   ├── model.safetensors        foundation / fine-tuned weights (bundle format v2; no pickle)
 │   └── artifact_manifest.json   target, ordered features, classes, artifact names + SHA-256s
 ├── evaluation/report.json       validation / optional test metrics + provenance
 ├── logs/run-summary.json        run parameters, device, provenance summary
@@ -402,10 +402,11 @@ a `test.csv`:
     "test": { "..": ".." }
   },
   "artifacts": {
-    "modelArtifact":      { "path": "fine-tuning/<run_id>/artifacts/model.tabpfn_fit", "name": "model.tabpfn_fit", "contentType": "application/octet-stream", "sizeBytes": N },
+    "modelArtifact":      { "path": "fine-tuning/<run_id>/artifacts/model.tabpfn_fit", "name": "model.tabpfn_fit", "contentType": "application/octet-stream", "sizeBytes": N, "sha256": ".." },
+    "modelWeights":       { "path": "fine-tuning/<run_id>/artifacts/model.safetensors", "name": "model.safetensors", "contentType": "application/octet-stream", "sizeBytes": N, "sha256": ".." },
     "evaluationReport":   { "path": "fine-tuning/<run_id>/evaluation/report.json", "..": ".." },
     "logArtifact":        { "path": "fine-tuning/<run_id>/logs/run-summary.json", "..": ".." },
-    "foundationCheckpoint": { "path": "fine-tuning/<run_id>/artifacts/model.ckpt", "..": ".." },
+    "foundationCheckpoint": { "path": "fine-tuning/<run_id>/artifacts/model.safetensors", "..": ".." },
     "manifest": { "..": ".." },
     "fittedSha256": "..", "foundationCheckpointSha256": "..",
     "reloadCheck": { "passed": true, "device": "cpu", "rows": N }
@@ -416,9 +417,9 @@ a `test.csv`:
 ```
 
 DIMER's `export-to-repository` resolves the exportable model by **`artifacts.modelArtifact`** —
-`model.tabpfn_fit`, keyed by a `/data`-relative `path` (in GPU-burst mode it instead carries the
+`model.tabpfn_fit` (now with its `sha256`), keyed by a `/data`-relative `path` (in GPU-burst mode it instead carries the
 uploaded S3 model **`key`**). There is **no literal `best.pt` requirement** on the default path.
-`foundationCheckpoint` (`model.ckpt`) is the second file the in-context learner needs at serve time;
+`modelWeights` (`model.safetensors`, with `sha256` and `sizeBytes`; `foundationCheckpoint` names the same file, `model.ckpt` in deprecated v1 bundles, see `DIMER_CONTRACT.md`) is the second file the in-context learner needs at serve time. `model.tabpfn_fit` is code-capable (ARTIFACT_SPEC SER9: reloading it unpickles its joblib state), so it is trusted only as far as `modelArtifact.sha256` / the manifest's `fittedEstimatorSha256`;
 `manifest`, `evaluationReport`, and `logArtifact` accompany them.
 
 `artifacts.reloadCheck` is written only after the fine-tuner reloads the just-saved artifact
@@ -432,7 +433,7 @@ with `metadata.baseModel` / `selectedModelId` still populated.
 `model_path`. Because DIMER may relocate artifacts between training and serving,
 [`serving/load_artifact.py`](serving/load_artifact.py) is directory-parameterized: given the
 artifact directory, it rewrites the fitted archive's `model_path` (in a temporary copy — the
-original is never modified) to point at the colocated `model.ckpt`, then loads the estimator. Both
+original is never modified) to point at the colocated `model.safetensors` (a v1 `model.ckpt` is first read with `weights_only=True` into a temporary safetensors file), then loads the estimator. Both
 files sit under `artifacts/`. This is the same rewrite the fine-tuner's in-runtime reload check
 performs.
 
