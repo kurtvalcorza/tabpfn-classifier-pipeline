@@ -67,6 +67,12 @@ SAMPLE_ARTIFACT_PRODUCER = {
     "run": "recorded hosted Colab T4 run; the release notes of the tag name the run record (SART8)",
     "release_tag": SAMPLE_ARTIFACT_TAG,
 }
+# Staged, NOT published: the v2 re-issue (bundle format v2, model.safetensors) of the v1 asset above, built
+# deterministically by re-issuing v1 (model.tabpfn_fit byte-identical, weights = the pinned conversion, a reissue block in
+# the manifest). The default stays on v1 until this tag is published; then the four SAMPLE_ARTIFACT_* pins above move to it.
+SAMPLE_ARTIFACT_V2_TAG = "sample-artifact-synthetic-v2"
+SAMPLE_ARTIFACT_V2_SHA256 = "8828df98a2db8047bc2d52313a5a173bfa499d8b780619899def268dee31b41c"
+SAMPLE_ARTIFACT_V2_BYTES = 197034023
 SAMPLE_ARTIFACT_MAX_BYTES = 512 * 1024 * 1024  # a download larger than this is refused before it is hashed or opened
 EXTERNAL_DIR = "external_artifact"  # under outputs/: the section's predictions and provenance (XAS6)
 EXTERNAL_SAMPLE_ROWS = 8

@@ -202,3 +202,14 @@ def test_real_v1_bundle_loads_with_weights_only_and_a_deprecation_warning(real_v
     assert np.array_equal(np.asarray(served.predict_proba(rows), dtype=float), expected)
     with pytest.raises(ValueError, match="not a safetensors file"):
         fresh.save_artifact(tmp_path / "re-export")
+
+
+def test_v2_sample_is_staged_and_the_default_stays_on_v1() -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("stages_for_pin", ROOT / "tools" / "tutorial_stages.py")
+    stages = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(stages)
+    assert stages.SAMPLE_ARTIFACT_TAG == "sample-artifact-synthetic-v1" and stages.SAMPLE_ARTIFACT_V2_TAG == "sample-artifact-synthetic-v2"
+    assert len(stages.SAMPLE_ARTIFACT_V2_SHA256) == 64 and stages.SAMPLE_ARTIFACT_V2_SHA256 != stages.SAMPLE_ARTIFACT_SHA256
+    assert stages.SAMPLE_ARTIFACT_V2_TAG not in stages.SAMPLE_ARTIFACT_URL and stages.SAMPLE_ARTIFACT_V2_BYTES > 0
