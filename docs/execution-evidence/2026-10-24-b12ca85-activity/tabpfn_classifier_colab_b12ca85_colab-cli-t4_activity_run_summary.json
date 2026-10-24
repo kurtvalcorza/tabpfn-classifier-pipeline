@@ -1,0 +1,51 @@
+{
+  "repo": "tabpfn-classifier-pipeline",
+  "sha": "b12ca85bda8fdcdb75422dba4987171e69bfbafe",
+  "notebook": "tutorials/tabpfn_classifier_colab.ipynb",
+  "blob": "020eaa852c3f26264ffc245d2a86bf4aeb754c60",
+  "gpu": "T4",
+  "session": "suite-tabpfn-b12ca85-d461",
+  "started_utc": "2026-10-24T13:04:56+00:00",
+  "runner": "Colab CLI `colab exec -f` on a fresh session (not a browser Run all)",
+  "overrides": [
+    {
+      "name": "RUN_ACTIVITY",
+      "from": "False",
+      "to": "True"
+    }
+  ],
+  "run_copy_blob": "e1b7b1ee6309c365fdcb0d71ec4a1813cf8a2a98",
+  "run_copy_sha256": "831764d175de298e539705a408015dd21b9a1d12b24b17b2f470bf96ca0785cc",
+  "run_copy_note": "the executed copy differs from the committed blob only in the listed assignment literals; input_unchanged compares against that copy",
+  "status": "[suite-tabpfn-b12ca85-d461] gpu-t4-s-usw1b1-2gt3q44hju981 | Hardware: T4 | Shape: Standard | Variant: GPU | Status: IDLE",
+  "exec_exit_code": 0,
+  "stopped": true,
+  "wall_s": 180.3,
+  "input_unchanged": true,
+  "executed_file": "tabpfn_classifier_colab_b12ca85_colab-cli-t4_output.ipynb",
+  "log_cells": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14
+  ],
+  "log_total": 14,
+  "code_cells": 14,
+  "executed_cells": 14,
+  "errors": [],
+  "execution_counts": [],
+  "sequential": null,
+  "executed_sha256": "ecfda29005b9529a8f432f0a32dea1d9cca31f73acaa558a45ff458cdbe92227",
+  "log_sequential_complete": true,
+  "verdict": "PASS"
+}
