@@ -96,7 +96,7 @@ for the production profile.
                           "sizeBytes": N },
     "evaluationReport": { "path": "fine-tuning/<run_id>/evaluation/report.json", "..": ".." },
     "logArtifact":      { "path": "fine-tuning/<run_id>/logs/run-summary.json", "..": ".." },
-    "foundationCheckpoint": { "path": "fine-tuning/<run_id>/artifacts/model.ckpt", "..": ".." },
+    "foundationCheckpoint": { "path": "fine-tuning/<run_id>/artifacts/model.safetensors", "..": ".." },
     "manifest": { "..": ".." }, "fittedSha256": "..", "foundationCheckpointSha256": "..",
     "reloadCheck": { "passed": true, "device": "cpu", "rows": N }
   },

@@ -138,7 +138,7 @@ frames = read_dataset_zip(build_synthetic_dataset("synthetic.zip"))
 manifest = validate_inputs(frames["train.csv"], "target", val=frames["val.csv"])  # raises InputRejected
 pipe.fit(X_train, y_train, target_column="target")           # in-context: no gradient update
 metrics = pipe.evaluate(X_val, y_val)
-pipe.save_artifact("artifact")                               # model.tabpfn_fit + model.ckpt + artifact_manifest.json
+pipe.save_artifact("artifact")                               # model.tabpfn_fit + model.safetensors + artifact_manifest.json (bundle format v2)
 fresh = TabPFNClassifierPipeline.from_artifact("artifact")            # validates the bundle, then reloads
 ```
 
@@ -147,7 +147,7 @@ Static gates (also run by CI): `ruff check .`, `pytest -m "not integration"`, `p
 
 ## Release status
 
-**Candidate — the current E2E blob `020eaa85` (regenerated from `3b451d9`, which serves the model from the pinned safetensors conversion of the checkpoint; the guard of `057ab9d` against a pickle load without `weights_only` stays) has no recorded hosted run yet (REL14). The hosted default-path and optional-activity runs at
+**Candidate — the current E2E blob `98e7dbc3` (regenerated from `f139b2c`: bundle format v2 with `model.safetensors`, see `DIMER_CONTRACT.md`; stacked on `3b451d9`, which serves the model from the pinned safetensors conversion of the checkpoint; the guard of `057ab9d` against a pickle load without `weights_only` stays) has no recorded hosted run yet (REL14). The hosted default-path and optional-activity runs at
 `9e69f88` (2026-10-23, PASS) cover the previous blob `e705db6e` and are history, as are the runs at `197d45b` of blob `7d8051f7`. A
 hosted default-path run and an optional-activity run of the current blob, a BYOD run (one input accepted, one refused; REL12) and a
 browser run of the interactive journeys (REL2) are required before promotion** (`STATUS.md`). The
@@ -376,7 +376,7 @@ A successful run writes the DIMER artifact layout under the run's output directo
 /data/fine-tuning/<run_id>/
 ├── artifacts/
 │   ├── model.tabpfn_fit         fitted estimator (foundation weights omitted from this archive)
-│   ├── model.ckpt               foundation / fine-tuned checkpoint
+│   ├── model.safetensors        foundation / fine-tuned weights (bundle format v2; no pickle)
 │   └── artifact_manifest.json   target, ordered features, classes, artifact names + SHA-256s
 ├── evaluation/report.json       validation / optional test metrics + provenance
 ├── logs/run-summary.json        run parameters, device, provenance summary
@@ -405,7 +405,7 @@ a `test.csv`:
     "modelArtifact":      { "path": "fine-tuning/<run_id>/artifacts/model.tabpfn_fit", "name": "model.tabpfn_fit", "contentType": "application/octet-stream", "sizeBytes": N },
     "evaluationReport":   { "path": "fine-tuning/<run_id>/evaluation/report.json", "..": ".." },
     "logArtifact":        { "path": "fine-tuning/<run_id>/logs/run-summary.json", "..": ".." },
-    "foundationCheckpoint": { "path": "fine-tuning/<run_id>/artifacts/model.ckpt", "..": ".." },
+    "foundationCheckpoint": { "path": "fine-tuning/<run_id>/artifacts/model.safetensors", "..": ".." },
     "manifest": { "..": ".." },
     "fittedSha256": "..", "foundationCheckpointSha256": "..",
     "reloadCheck": { "passed": true, "device": "cpu", "rows": N }
@@ -418,7 +418,7 @@ a `test.csv`:
 DIMER's `export-to-repository` resolves the exportable model by **`artifacts.modelArtifact`** —
 `model.tabpfn_fit`, keyed by a `/data`-relative `path` (in GPU-burst mode it instead carries the
 uploaded S3 model **`key`**). There is **no literal `best.pt` requirement** on the default path.
-`foundationCheckpoint` (`model.ckpt`) is the second file the in-context learner needs at serve time;
+`foundationCheckpoint` (`model.safetensors`; `model.ckpt` in deprecated v1 bundles, see `DIMER_CONTRACT.md`) is the second file the in-context learner needs at serve time;
 `manifest`, `evaluationReport`, and `logArtifact` accompany them.
 
 `artifacts.reloadCheck` is written only after the fine-tuner reloads the just-saved artifact
@@ -432,7 +432,7 @@ with `metadata.baseModel` / `selectedModelId` still populated.
 `model_path`. Because DIMER may relocate artifacts between training and serving,
 [`serving/load_artifact.py`](serving/load_artifact.py) is directory-parameterized: given the
 artifact directory, it rewrites the fitted archive's `model_path` (in a temporary copy — the
-original is never modified) to point at the colocated `model.ckpt`, then loads the estimator. Both
+original is never modified) to point at the colocated `model.safetensors` (a v1 `model.ckpt` is first read with `weights_only=True` into a temporary safetensors file), then loads the estimator. Both
 files sit under `artifacts/`. This is the same rewrite the fine-tuner's in-runtime reload check
 performs.
 
