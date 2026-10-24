@@ -453,8 +453,11 @@ def validate_identity_consistency() -> None:
 WEIGHT_DOCS = ("README.md", "MODEL_CARD.md", "docs/WEIGHTS.md")
 EXTERNAL_WEIGHT_BYTES: dict[int, str] = {
     212_818_107: "untracked weights/model.ckpt, a re-serialised TabPFN-3 checkpoint copy",
+    212_699_804: "served safetensors conversion of the pinned checkpoint (pipeline.CONVERTED_BYTES)",
 }
-EXTERNAL_WEIGHT_DIGESTS: dict[str, str] = {}
+EXTERNAL_WEIGHT_DIGESTS: dict[str, str] = {
+    "f1f5408aeeffdcdfaf4842f0eff072c67ff3fbbb2c29d46d14eb564190d0b7d2": "served safetensors conversion of the pinned checkpoint (pipeline.CONVERTED_SHA256)",
+}
 _DIGEST = re.compile(r"(?<![0-9a-fA-F])[0-9a-f]{64}(?![0-9a-fA-F])")
 _GROUPED = r"(\d{1,3}(?:[,\u202f\u00a0 ]\d{3})+|\d+)"
 _BYTE_COUNT = re.compile(r"(?<![\d,\-])" + _GROUPED + r"\s*bytes\b|totalBytes`?\s*" + _GROUPED)

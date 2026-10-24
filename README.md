@@ -115,7 +115,7 @@ One generated notebook under `tutorials/` demonstrates the pipeline **without th
 `tools/notebook_template.py`, it carries
 `src/tabpfn_classifier_pipeline/pipeline.py` verbatim, the 4-file snapshot manifest of the pinned
 `Prior-Labs/tabpfn_3` checkpoint (`tabpfn-v3-classifier-v3_default.ckpt` at immutable revision
-`24a16a89d245878b846555110985634aa2e656d7`, see `docs/WEIGHTS.md`) and the `pyproject.toml` runtime pins inline, so the
+`24a16a89d245878b846555110985634aa2e656d7`, served from its pinned safetensors conversion, see `docs/WEIGHTS.md`) and the `pyproject.toml` runtime pins inline, so the
 exported `.ipynb` needs no clone, no package install, no token and no access to this repository.
 
 | Notebook | Profile | What it does |
@@ -147,7 +147,7 @@ Static gates (also run by CI): `ruff check .`, `pytest -m "not integration"`, `p
 
 ## Release status
 
-**Candidate — the current E2E blob `41dc2a68` (regenerated from `057ab9d`, which refuses to load a TabPFN checkpoint when torch is older than 2.6 or `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD` is set) has no recorded hosted run yet (REL14). The hosted default-path and optional-activity runs at
+**Candidate — the current E2E blob `020eaa85` (regenerated from `3b451d9`, which serves the model from the pinned safetensors conversion of the checkpoint; the guard of `057ab9d` against a pickle load without `weights_only` stays) has no recorded hosted run yet (REL14). The hosted default-path and optional-activity runs at
 `9e69f88` (2026-10-23, PASS) cover the previous blob `e705db6e` and are history, as are the runs at `197d45b` of blob `7d8051f7`. A
 hosted default-path run and an optional-activity run of the current blob, a BYOD run (one input accepted, one refused; REL12) and a
 browser run of the interactive journeys (REL2) are required before promotion** (`STATUS.md`). The
@@ -520,7 +520,7 @@ from Prior Labs.
 | v3 weights | [`Prior-Labs/tabpfn_3`](https://huggingface.co/Prior-Labs/tabpfn_3) (not access-gated; non-commercial) |
 | Licence | `v2` Apache-derived (commercial OK); `v2.5` / `v2.6` / `v3` non-commercial |
 | Component pins | `COMPONENTS.json` (immutable validator + finetuner commit SHAs) |
-| Standalone-notebook pin | `Prior-Labs/tabpfn_3` @ `24a16a89d245878b846555110985634aa2e656d7`, `tabpfn-v3-classifier-v3_default.ckpt` SHA-256 `d0d865d54dfbc524f5703104be90620182dca7e5fb2c16de72e9959ea18f3988` (`weights/tabpfn-3-classifier/dimer-base-manifest.json`, `docs/WEIGHTS.md`) |
+| Standalone-notebook pin | `Prior-Labs/tabpfn_3` @ `24a16a89d245878b846555110985634aa2e656d7`, `tabpfn-v3-classifier-v3_default.ckpt` SHA-256 `d0d865d54dfbc524f5703104be90620182dca7e5fb2c16de72e9959ea18f3988` (`weights/tabpfn-3-classifier/dimer-base-manifest.json`, `docs/WEIGHTS.md`); served file `tabpfn-v3-classifier-v3_default.safetensors` SHA-256 `f1f5408aeeffdcdfaf4842f0eff072c67ff3fbbb2c29d46d14eb564190d0b7d2` (`CONVERTED_SHA256`) |
 
 Strongest provenance comes from mounting a specific approved checkpoint via
 `DIMER_TABPFN_MODEL_PATH`: the run hashes that exact file into `provenance.model.baseModelSha256`
