@@ -138,7 +138,7 @@ frames = read_dataset_zip(build_synthetic_dataset("synthetic.zip"))
 manifest = validate_inputs(frames["train.csv"], "target", val=frames["val.csv"])  # raises InputRejected
 pipe.fit(X_train, y_train, target_column="target")           # in-context: no gradient update
 metrics = pipe.evaluate(X_val, y_val)
-pipe.save_artifact("artifact")                               # model.tabpfn_fit + model.ckpt + artifact_manifest.json
+pipe.save_artifact("artifact")                               # model.tabpfn_fit + model.ckpt + model.safetensors + artifact_manifest.json
 fresh = TabPFNClassifierPipeline.from_artifact("artifact")            # validates the bundle, then reloads
 ```
 

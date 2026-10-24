@@ -5,7 +5,7 @@ Inference-only: the pinned TabPFN-3 classifier checkpoint conditions on the labe
 fine-tuning path of this pipeline lives in the private ``tabpfn-classifier-finetuner`` worker and is NOT carried
 here (private code; TabPFN-3 weights are non-commercial). This module owns the pinned snapshot scheme, the input
 contract (DAT24), the ICL fit / predict / evaluate calls, the ``model.tabpfn_fit`` + ``model.ckpt`` +
-``artifact_manifest.json`` bundle the serving path consumes, its pre-load validation, and the evaluation report
+``model.safetensors`` + ``artifact_manifest.json`` bundle the serving path consumes, its pre-load validation, and the evaluation report
 (EVAL21). ``tabpfn`` / ``torch`` are imported lazily inside the functions that need them.
 """
 # ruff: noqa: E501  -- contract dictionaries and messages are kept on single lines
@@ -14,7 +14,10 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import math
 import shutil
+import struct
+import sys
 import tempfile
 import zipfile
 from collections.abc import Callable, Sequence
@@ -55,7 +58,18 @@ METRIC_IDS = ("accuracy", "balancedAccuracy", "logLoss", "rocAuc")
 ARTIFACT_SCHEMA_VERSION = 1
 FITTED_NAME = "model.tabpfn_fit"
 CHECKPOINT_NAME = "model.ckpt"
+CONVERTED_CHECKPOINT_NAME = "model.safetensors"
 ARTIFACT_MANIFEST_NAME = "artifact_manifest.json"
+ARTIFACT_MEMBERS = (ARTIFACT_MANIFEST_NAME, FITTED_NAME, CHECKPOINT_NAME, CONVERTED_CHECKPOINT_NAME)
+# ARTIFACT_SPEC SER9 (b): model.ckpt is the byte copy of the pinned upstream (pickle-backed) checkpoint, kept so its
+# identity can be verified against WEIGHTS_SHA256; model.safetensors is its faithful non-code-executing conversion
+# (SER7/SER8), and is the file the reload path hands to TabPFN. The conversion is deterministic, so converting the
+# pinned checkpoint always gives these bytes (tests/test_safetensors_conversion.py checks it when the checkpoint is staged).
+SAFETENSORS_CONVERTER = "tabpfn_classifier_pipeline.convert_checkpoint_to_safetensors"
+SAFETENSORS_CONVERTER_VERSION = 1  # bump when the emitted bytes change; WEIGHTS_SAFETENSORS_* below must then be re-derived
+WEIGHTS_SAFETENSORS_SHA256 = "c6908ae69702329534c54c4782e082bfe78fd763855cf9af5236bae4223b7b2a"
+WEIGHTS_SAFETENSORS_BYTES = 212699460
+MAX_SAFETENSORS_HEADER_BYTES = 100 * 1024 * 1024  # the safetensors library's own header ceiling
 
 
 # --------------------------------------------------------------------------- snapshot scheme
@@ -401,8 +415,202 @@ def manifest_digest(manifest: dict[str, Any], key: str) -> str:
     return value
 
 
-def validate_artifact_bundle(artifact_dir: str | Path, *, expected_fitted_sha256: str = "", expected_checkpoint_sha256: str = "") -> dict[str, Any]:
-    """Check manifest schema, member names, sizes, digests and archive safety BEFORE any model state is deserialised."""
+# --------------------------------------------------------------------------- safetensors conversion (SER7-SER9 b)
+
+# torch dtype name -> safetensors dtype tag, and the tag's item size in bytes.
+SAFETENSORS_DTYPES = {"float64": "F64", "float32": "F32", "float16": "F16", "bfloat16": "BF16", "int64": "I64", "int32": "I32", "int16": "I16", "int8": "I8", "uint8": "U8", "bool": "BOOL"}
+_ITEM_BYTES = {"F64": 8, "F32": 4, "F16": 2, "BF16": 2, "I64": 8, "I32": 4, "I16": 2, "I8": 1, "U8": 1, "BOOL": 1}
+
+
+def plain_metadata(value: Any, where: str = "checkpoint") -> Any:
+    """Return ``value`` as JSON plain data (SER11), or raise: str-keyed mappings, lists (a tuple becomes a JSON array),
+    strings, finite numbers, booleans and None. Anything else would need code to rebuild, so it is refused."""
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{where}: non-finite float {value!r} has no JSON plain-data form")
+        return value
+    if isinstance(value, (list, tuple)):
+        return [plain_metadata(v, f"{where}[{i}]") for i, v in enumerate(value)]
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError(f"{where}: non-string key {key!r} has no JSON plain-data form")
+            out[key] = plain_metadata(item, f"{where}.{key}")
+        return out
+    raise ValueError(f"{where}: {type(value).__name__} is not plain data; refusing to convert (it cannot be carried in a safetensors header)")
+
+
+def metadata_json(value: Any, where: str = "checkpoint") -> str:
+    """The one canonical JSON text of a checkpoint field: sorted keys, compact separators, no NaN."""
+    return json.dumps(plain_metadata(value, where), sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def write_safetensors(path: str | Path, tensors: dict[str, tuple[str, Sequence[int], bytes]], metadata: dict[str, str] | None = None) -> str:
+    """Write a safetensors file deterministically and return its SHA-256 (no torch needed).
+
+    ``tensors`` maps a name to ``(dtype tag, shape, little-endian C-order bytes)``. Tensors are laid out in sorted
+    name order; the header is JSON with sorted keys and compact separators, space-padded to a multiple of 8 bytes, so
+    the same tensors and metadata always give the same bytes (the safetensors library itself emits ``__metadata__``
+    in hash-map order).
+    """
+    header: dict[str, Any] = {}
+    offset = 0
+    for name in sorted(tensors):
+        dtype, shape, payload = tensors[name]
+        if not isinstance(name, str) or not name or name == "__metadata__":
+            raise ValueError(f"invalid tensor name {name!r}")
+        if dtype not in _ITEM_BYTES:
+            raise ValueError(f"{name}: unsupported safetensors dtype {dtype!r}")
+        shape = [int(d) for d in shape]
+        if any(d < 0 for d in shape) or len(payload) != _ITEM_BYTES[dtype] * math.prod(shape):
+            raise ValueError(f"{name}: {len(payload)} bytes do not match dtype {dtype} and shape {shape}")
+        header[name] = {"data_offsets": [offset, offset + len(payload)], "dtype": dtype, "shape": shape}
+        offset += len(payload)
+    if metadata:
+        if not all(isinstance(k, str) and isinstance(v, str) for k, v in metadata.items()):
+            raise ValueError("safetensors metadata must map strings to strings")
+        header["__metadata__"] = dict(metadata)
+    raw = json.dumps(header, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    raw += b" " * (-len(raw) % 8)
+    path = Path(path)
+    partial = path.with_name(path.name + ".part")
+    with partial.open("wb") as handle:
+        handle.write(struct.pack("<Q", len(raw)))
+        handle.write(raw)
+        for name in sorted(tensors):
+            handle.write(tensors[name][2])
+    partial.replace(path)
+    return sha256_file(path)
+
+
+def read_safetensors_header(path: str | Path) -> dict[str, Any]:
+    """Parse and check a safetensors file's structure without torch: header size, JSON, string metadata, known dtypes,
+    and tensor spans that tile the data section exactly. Raises ``ValueError`` on anything malformed. The format holds
+    only a JSON header and raw tensor bytes, so nothing in it is executed when it is read."""
+    path = Path(path)
+    size = path.stat().st_size
+    with path.open("rb") as handle:
+        prefix = handle.read(8)
+        if len(prefix) != 8:
+            raise ValueError(f"{path.name}: too short to be a safetensors file")
+        (length,) = struct.unpack("<Q", prefix)
+        if length > MAX_SAFETENSORS_HEADER_BYTES or 8 + length > size:
+            raise ValueError(f"{path.name}: safetensors header length {length} is implausible for a {size}-byte file")
+        raw = handle.read(length)
+    try:
+        header = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{path.name}: safetensors header is not JSON ({exc})") from None
+    if not isinstance(header, dict):
+        raise ValueError(f"{path.name}: safetensors header is not a JSON object")
+    metadata = header.pop("__metadata__", None) or {}
+    if not isinstance(metadata, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in metadata.items()):
+        raise ValueError(f"{path.name}: safetensors __metadata__ must map strings to strings")
+    spans = []
+    for name, entry in header.items():
+        if not isinstance(entry, dict) or set(entry) != {"dtype", "shape", "data_offsets"}:
+            raise ValueError(f"{path.name}: tensor {name!r} has a malformed header entry")
+        dtype, shape, offsets = entry["dtype"], entry["shape"], entry["data_offsets"]
+        if dtype not in _ITEM_BYTES:
+            raise ValueError(f"{path.name}: tensor {name!r} has unsupported dtype {dtype!r}")
+        if not isinstance(shape, list) or not all(isinstance(d, int) and not isinstance(d, bool) and d >= 0 for d in shape):
+            raise ValueError(f"{path.name}: tensor {name!r} has a malformed shape {shape!r}")
+        if not isinstance(offsets, list) or len(offsets) != 2 or not all(isinstance(o, int) and not isinstance(o, bool) for o in offsets):
+            raise ValueError(f"{path.name}: tensor {name!r} has malformed data_offsets {offsets!r}")
+        if offsets[1] - offsets[0] != _ITEM_BYTES[dtype] * math.prod(shape):
+            raise ValueError(f"{path.name}: tensor {name!r} spans {offsets} but dtype {dtype} x shape {shape} needs {_ITEM_BYTES[dtype] * math.prod(shape)} bytes")
+        spans.append((offsets[0], offsets[1], name))
+    cursor = 0
+    for begin, end, name in sorted(spans):
+        if begin != cursor:
+            raise ValueError(f"{path.name}: tensor {name!r} starts at {begin}, expected {cursor} (gap or overlap in the data section)")
+        cursor = end
+    if 8 + length + cursor != size:
+        raise ValueError(f"{path.name}: data section is {size - 8 - length} bytes but the tensors cover {cursor}")
+    return {"metadata": metadata, "tensors": header, "dataStart": 8 + length}
+
+
+def _load_checkpoint_restricted(checkpoint: str | Path) -> dict[str, Any]:
+    """``torch.load(..., weights_only=True)``: PyTorch's restricted unpickler (SER12); refuses anything but tensors and plain containers."""
+    import torch
+
+    obj = torch.load(str(checkpoint), map_location="cpu", weights_only=True)
+    if not isinstance(obj, dict) or not isinstance(obj.get("state_dict"), dict):
+        raise ValueError(f"{Path(checkpoint).name}: expected a checkpoint dict with a 'state_dict' mapping")
+    return obj
+
+
+def _tensor_bytes(tensor: Any) -> tuple[str, list[int], bytes]:
+    import torch
+
+    dtype = SAFETENSORS_DTYPES.get(str(tensor.dtype).removeprefix("torch."))
+    if dtype is None:
+        raise ValueError(f"tensor dtype {tensor.dtype} has no safetensors equivalent here")
+    flat = tensor.detach().to("cpu").contiguous().reshape(-1)  # a fresh contiguous view per tensor: shared storage is never aliased
+    return dtype, list(tensor.shape), flat.view(torch.uint8).numpy().tobytes()
+
+
+def convert_checkpoint_to_safetensors(checkpoint: str | Path, destination: str | Path) -> dict[str, Any]:
+    """Convert a TabPFN ``.ckpt`` (a dict whose ``state_dict`` holds tensors) to ``destination`` (safetensors), then
+    prove the conversion faithful (``verify_safetensors_conversion``) before returning.
+
+    Layout is the one TabPFN's own ``Checkpoint`` loader reads: the ``state_dict`` tensors under their own names, and
+    every other top-level field as one ``__metadata__`` entry holding that field's canonical JSON (``metadata_json``).
+    The checkpoint is read with ``weights_only=True``; a field that is not plain data is refused, not approximated.
+    """
+    import torch
+
+    if sys.byteorder != "little":
+        raise RuntimeError("safetensors stores little-endian tensor bytes; this converter runs on little-endian hosts only")
+    obj = _load_checkpoint_restricted(checkpoint)
+    tensors: dict[str, tuple[str, list[int], bytes]] = {}
+    for name, value in obj["state_dict"].items():
+        if not isinstance(name, str) or not isinstance(value, torch.Tensor):
+            raise ValueError(f"state_dict entry {name!r} is not a named tensor ({type(value).__name__})")
+        tensors[name] = _tensor_bytes(value)
+    metadata = {key: metadata_json(value, key) for key, value in obj.items() if key != "state_dict"}
+    digest = write_safetensors(destination, tensors, metadata)
+    check = verify_safetensors_conversion(checkpoint, destination, _loaded=obj)
+    return {"sha256": digest, **check}
+
+
+def verify_safetensors_conversion(checkpoint: str | Path, converted: str | Path, *, _loaded: dict[str, Any] | None = None) -> dict[str, Any]:
+    """SER8: ``converted`` must hold exactly the checkpoint's tensors (same names, dtypes, shapes, and bit-identical
+    values) and exactly its other fields as canonical JSON. Read back with the safetensors library; raises ``ValueError``."""
+    import safetensors
+    import torch
+    from safetensors import safe_open
+
+    obj = _loaded if _loaded is not None else _load_checkpoint_restricted(checkpoint)
+    state = obj["state_dict"]
+    read_safetensors_header(converted)
+    with safe_open(str(converted), framework="pt", device="cpu") as handle:
+        metadata = handle.metadata() or {}
+        names = set(handle.keys())
+        if names != set(state):
+            raise ValueError(f"{Path(converted).name}: tensor names differ from the checkpoint (missing {sorted(set(state) - names)[:5]}, extra {sorted(names - set(state))[:5]})")
+        for name in sorted(names):
+            got, ref = handle.get_tensor(name), state[name].detach().to("cpu")
+            if got.dtype != ref.dtype or tuple(got.shape) != tuple(ref.shape):
+                raise ValueError(f"{Path(converted).name}: tensor {name!r} is {got.dtype}{tuple(got.shape)}, checkpoint has {ref.dtype}{tuple(ref.shape)}")
+            if not torch.equal(got.contiguous().reshape(-1).view(torch.uint8), ref.contiguous().reshape(-1).view(torch.uint8)):
+                raise ValueError(f"{Path(converted).name}: tensor {name!r} differs from the checkpoint")
+    expected = {key: metadata_json(value, key) for key, value in obj.items() if key != "state_dict"}
+    if metadata != expected:
+        differing = sorted(k for k in set(metadata) | set(expected) if metadata.get(k) != expected.get(k))
+        raise ValueError(f"{Path(converted).name}: header metadata differs from the checkpoint's non-tensor fields: {differing}")
+    return {"tensors": len(names), "metadataKeys": sorted(expected), "bitwiseEqual": True, "torchVersion": torch.__version__, "safetensorsVersion": safetensors.__version__}
+
+
+def validate_artifact_bundle(artifact_dir: str | Path, *, expected_fitted_sha256: str = "", expected_checkpoint_sha256: str = "", expected_converted_sha256: str = "", verify_conversion: bool = False) -> dict[str, Any]:
+    """Check manifest schema, member names, sizes, digests and archive safety BEFORE any model state is deserialised.
+
+    ``model.safetensors`` is required: its digest must match the manifest (and ``expected_converted_sha256`` when
+    given), its provenance must name ``model.ckpt``'s verified digest, and its structure is parsed without torch.
+    ``verify_conversion=True`` additionally compares it tensor by tensor with ``model.ckpt`` (needs torch; SER8)."""
     root = Path(artifact_dir)
     manifest_path = root / ARTIFACT_MANIFEST_NAME
     if not manifest_path.is_file():
@@ -414,7 +622,9 @@ def validate_artifact_bundle(artifact_dir: str | Path, *, expected_fitted_sha256
         if key not in manifest:
             raise ValueError(f"manifest lacks {key}")
     digests: dict[str, str] = {}
-    for key, override in (("fittedEstimator", expected_fitted_sha256), ("foundationCheckpoint", expected_checkpoint_sha256)):
+    if manifest.get("convertedCheckpoint") != CONVERTED_CHECKPOINT_NAME:
+        raise ValueError(f"manifest must name {CONVERTED_CHECKPOINT_NAME} as convertedCheckpoint (ARTIFACT_SPEC SER9 b), got {manifest.get('convertedCheckpoint')!r}; this bundle predates the safetensors conversion or was altered")
+    for key, override in (("fittedEstimator", expected_fitted_sha256), ("foundationCheckpoint", expected_checkpoint_sha256), ("convertedCheckpoint", expected_converted_sha256)):
         name = manifest.get(key)
         if not isinstance(name, str) or Path(name).name != name:
             raise ValueError(f"manifest {key} must be a bare file name, got {name!r}")
@@ -427,8 +637,18 @@ def validate_artifact_bundle(artifact_dir: str | Path, *, expected_fitted_sha256
         if override and digest != override.strip().lower():
             raise ValueError(f"{name} SHA-256 {digest} != expected {override.strip().lower()}")
         digests[key] = digest
+    provenance = manifest.get("convertedCheckpointProvenance") or {}
+    derived = provenance.get("derivedFrom") or {}
+    if (derived.get("file"), derived.get("sha256")) != (manifest["foundationCheckpoint"], digests["foundationCheckpoint"]):
+        raise ValueError(f"{CONVERTED_CHECKPOINT_NAME} provenance derivedFrom {derived!r} does not name the verified {manifest['foundationCheckpoint']} (SHA-256 {digests['foundationCheckpoint']})")
+    if provenance.get("tool") != SAFETENSORS_CONVERTER:
+        raise ValueError(f"{CONVERTED_CHECKPOINT_NAME} provenance names tool {provenance.get('tool')!r}, expected {SAFETENSORS_CONVERTER}")
+    converted = read_safetensors_header(root / manifest["convertedCheckpoint"])
+    conversion = {"checked": "structure and digest", "tensors": len(converted["tensors"])}
+    if verify_conversion:
+        conversion = {"checked": "tensor-by-tensor against the checkpoint (SER8)", **verify_safetensors_conversion(root / manifest["foundationCheckpoint"], root / manifest["convertedCheckpoint"])}
     init_params = _safe_fitted_archive(root / manifest["fittedEstimator"])
-    return {**manifest, "verifiedSha256": digests, "recordedModelPath": init_params.get("model_path")}
+    return {**manifest, "verifiedSha256": digests, "recordedModelPath": init_params.get("model_path"), "conversionCheck": conversion}
 
 
 def rewrite_model_path(fitted_archive: Path, checkpoint: Path, destination: Path) -> Path:
@@ -457,7 +677,7 @@ def rewrite_model_path(fitted_archive: Path, checkpoint: Path, destination: Path
 
 
 def zip_artifact_bundle(artifact_dir: str | Path, zip_path: str | Path) -> str:
-    """Zip the three bundle members flat (bare names) for transport; returns the ZIP SHA-256.
+    """Zip the four bundle members (``ARTIFACT_MEMBERS``) flat (bare names) for transport; returns the ZIP SHA-256.
 
     Deterministic: members in sorted order, each with a fixed timestamp (1980-01-01 00:00:00) and mode 0644, so the same
     member bytes always give the same ZIP digest. The ZIP is written to a temporary file and moved into place atomically.
@@ -466,7 +686,7 @@ def zip_artifact_bundle(artifact_dir: str | Path, zip_path: str | Path) -> str:
     zip_path.parent.mkdir(parents=True, exist_ok=True)
     partial = zip_path.with_name(zip_path.name + ".part")
     with zipfile.ZipFile(partial, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for name in sorted((ARTIFACT_MANIFEST_NAME, FITTED_NAME, CHECKPOINT_NAME)):
+        for name in sorted(ARTIFACT_MEMBERS):
             info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o100644 << 16
@@ -555,8 +775,9 @@ class TabPFNClassifierPipeline:
         predicted = [classes[i] for i in proba.argmax(axis=1)]
         return classification_metrics(list(y), predicted, proba, classes)
 
-    def save_artifact(self, artifact_dir: str | Path, *, saver: Callable[[Any, Path], None] | None = None) -> dict[str, Any]:
-        """Write ``model.tabpfn_fit`` + ``model.ckpt`` (byte copy of the verified checkpoint) + ``artifact_manifest.json``."""
+    def save_artifact(self, artifact_dir: str | Path, *, saver: Callable[[Any, Path], None] | None = None, converter: Callable[[Path, Path], dict[str, Any]] | None = None) -> dict[str, Any]:
+        """Write ``model.tabpfn_fit`` + ``model.ckpt`` (byte copy of the verified checkpoint) + ``model.safetensors`` (its
+        faithful conversion, proven tensor by tensor before the manifest is written) + ``artifact_manifest.json``."""
         model = self._require()
         root = Path(artifact_dir)
         root.mkdir(parents=True, exist_ok=True)
@@ -569,6 +790,11 @@ class TabPFNClassifierPipeline:
 
         saver(model, root / FITTED_NAME)
         shutil.copyfile(self.weights_path, root / CHECKPOINT_NAME)
+        checkpoint_sha256 = sha256_file(root / CHECKPOINT_NAME)
+        conversion = (converter or convert_checkpoint_to_safetensors)(root / CHECKPOINT_NAME, root / CONVERTED_CHECKPOINT_NAME)
+        converted_sha256 = sha256_file(root / CONVERTED_CHECKPOINT_NAME)
+        if conversion.get("bitwiseEqual") is not True or conversion.get("sha256") != converted_sha256:
+            raise RuntimeError(f"the {CONVERTED_CHECKPOINT_NAME} conversion was not verified against {CHECKPOINT_NAME}: {conversion!r}")
         manifest = {
             "schemaVersion": ARTIFACT_SCHEMA_VERSION,
             "taskType": TASK_TYPE,
@@ -578,7 +804,17 @@ class TabPFNClassifierPipeline:
             "fittedEstimator": FITTED_NAME,
             "foundationCheckpoint": CHECKPOINT_NAME,
             "fittedEstimatorSha256": sha256_file(root / FITTED_NAME),
-            "foundationCheckpointSha256": sha256_file(root / CHECKPOINT_NAME),
+            "foundationCheckpointSha256": checkpoint_sha256,
+            "convertedCheckpoint": CONVERTED_CHECKPOINT_NAME,
+            "convertedCheckpointSha256": converted_sha256,
+            "convertedCheckpointProvenance": {
+                "derivedFrom": {"file": CHECKPOINT_NAME, "sha256": checkpoint_sha256},
+                "tool": SAFETENSORS_CONVERTER,
+                "toolVersion": SAFETENSORS_CONVERTER_VERSION,
+                "method": "torch.load(weights_only=True); state_dict tensors written byte for byte under their own names; every other checkpoint field as one canonical-JSON __metadata__ entry (TabPFN Checkpoint layout); deterministic header",
+                "verification": {k: conversion[k] for k in ("tensors", "metadataKeys", "bitwiseEqual", "torchVersion", "safetensorsVersion") if k in conversion},
+                "serClause": "SER9 (b): model.ckpt is the byte copy of the pinned upstream checkpoint, kept so its identity can be verified; model.safetensors is its faithful non-code-executing conversion and is what the reload path loads",
+            },
             "portableLoader": "tabpfn_classifier_pipeline.TabPFNClassifierPipeline.from_artifact",
             "baseModel": {"modelId": MODEL_ID, "revision": MODEL_REVISION, "file": WEIGHTS_FILE, "sha256": WEIGHTS_SHA256, "modelVersion": MODEL_VERSION, "license": MODEL_LICENSE},
             "mode": "zero-shot-icl",
@@ -589,10 +825,12 @@ class TabPFNClassifierPipeline:
         return manifest
 
     @classmethod
-    def from_artifact(cls, artifact_dir: str | Path, device: str | None = None, *, expected_fitted_sha256: str = "", expected_checkpoint_sha256: str = "", loader: Callable[[Path, str], Any] | None = None) -> TabPFNClassifierPipeline:
-        """Validate the bundle, then reconstruct the estimator from the fitted archive + companion checkpoint (no refit, no download)."""
+    def from_artifact(cls, artifact_dir: str | Path, device: str | None = None, *, expected_fitted_sha256: str = "", expected_checkpoint_sha256: str = "", expected_converted_sha256: str = "", verify_conversion: bool = False, loader: Callable[[Path, str], Any] | None = None) -> TabPFNClassifierPipeline:
+        """Validate the bundle, then reconstruct the estimator from the fitted archive + the validated ``model.safetensors``
+        (no refit, no download). TabPFN reads a ``.safetensors`` model_path with safetensors' ``safe_open``, so the
+        pickle-backed ``model.ckpt`` is never deserialised here; it stays in the bundle as the digest-bound byte copy."""
         root = Path(artifact_dir)
-        manifest = validate_artifact_bundle(root, expected_fitted_sha256=expected_fitted_sha256, expected_checkpoint_sha256=expected_checkpoint_sha256)
+        manifest = validate_artifact_bundle(root, expected_fitted_sha256=expected_fitted_sha256, expected_checkpoint_sha256=expected_checkpoint_sha256, expected_converted_sha256=expected_converted_sha256, verify_conversion=verify_conversion)
         if device is None:
             import torch
 
@@ -603,14 +841,14 @@ class TabPFNClassifierPipeline:
             def loader(fitted: Path, dev: str) -> Any:
                 return load_fitted_tabpfn_model(fitted, device=dev)
 
-        checkpoint = root / manifest["foundationCheckpoint"]
+        converted = root / manifest["convertedCheckpoint"]
         with tempfile.TemporaryDirectory() as temp_dir:
-            rewritten = rewrite_model_path(root / manifest["fittedEstimator"], checkpoint, Path(temp_dir) / FITTED_NAME)
+            rewritten = rewrite_model_path(root / manifest["fittedEstimator"], converted, Path(temp_dir) / FITTED_NAME)
             model = loader(rewritten, device)
         classes = [str(c) for c in getattr(model, "classes_", manifest["classes"])]
         if classes != [str(c) for c in manifest["classes"]]:
             raise RuntimeError("reconstructed classes disagree with the manifest")
-        return cls(weights_path=checkpoint, device=device, source="artifact", n_estimators=int(manifest.get("nEstimators", DEFAULT_N_ESTIMATORS)), random_state=int(manifest.get("randomState", DEFAULT_SEED)), target_column=manifest["targetColumn"], feature_columns=list(manifest["featureColumns"]), classes=classes, _model=model)
+        return cls(weights_path=root / manifest["foundationCheckpoint"], device=device, source="artifact", n_estimators=int(manifest.get("nEstimators", DEFAULT_N_ESTIMATORS)), random_state=int(manifest.get("randomState", DEFAULT_SEED)), target_column=manifest["targetColumn"], feature_columns=list(manifest["featureColumns"]), classes=classes, _model=model)
 
 
 # --------------------------------------------------------------------------- evaluation report (EVAL21)

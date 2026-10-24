@@ -248,3 +248,23 @@ The files below were committed with local absolute paths in them. Each local run
 | `docs/execution-evidence/2026-10-10/tabpfn_classifier_colab_0e5a27c_colab-cli-t4_exec.log` | 2 | `c2874688ec26e323e88a5e62f50f534f5d24304726ca177edc7ae9c540245bdb` | `427bd2876eefc9560235f2c0d93aba12fd23b9f81d1ec3afb3b3e9f951d0e79c` |
 
 The Recorded executions table above quotes the pre-redaction hash of 2 of these logs as the hash of the committed file. Those quotes are kept as recorded, and the post-redaction hash is noted beside each one.
+
+## Artifact contract change: `model.safetensors` (2026-10-24)
+
+From branch `fix/ser9b-safetensors-ckpt`, the exported bundle has four members: `save_artifact` adds `model.safetensors`, the
+faithful safetensors conversion of the `model.ckpt` byte copy (ARTIFACT_SPEC SER9 (b), SER7, SER8), records it in
+`artifact_manifest.json` (`convertedCheckpoint`, `convertedCheckpointSha256`, `convertedCheckpointProvenance` with
+`derivedFrom` = `model.ckpt` and its SHA-256), and the reload path rebuilds the estimator from it. `validate_artifact_bundle`
+and the external-artifact section now refuse a bundle without it.
+
+- Converting the pinned checkpoint (`d0d865d5…3988`, 212,804,803 bytes) gives `model.safetensors` of 212,699,460 bytes,
+  SHA-256 `c6908ae69702329534c54c4782e082bfe78fd763855cf9af5236bae4223b7b2a` (`WEIGHTS_SAFETENSORS_SHA256`), byte-identical in two
+  fresh interpreters on local Windows and once on WSL Ubuntu (Python 3.11, torch 2.11.0+cpu, safetensors 0.8.0; 510 float32 tensors, bitwise equal to the
+  checkpoint's). A local CPU drive of `save_artifact` and `from_artifact` on the real `tabpfn==8.1.0` gave probabilities identical
+  (max abs difference 0.0) to the checkpoint-loaded estimator. These are local checks, not clean-runtime evidence.
+- **The pinned sample artifact `sample-artifact-synthetic-v1` predates this change.** It holds three members and no
+  `model.safetensors`, so the external-artifact section's default (pinned) branch refuses it at the member check. A new sample
+  artifact must be produced by a recorded hosted run of the current notebook's default path, published under a new release tag,
+  and pinned (`SAMPLE_ARTIFACT_URL`, `SAMPLE_ARTIFACT_SHA256`, `SAMPLE_ARTIFACT_BYTES`, `SAMPLE_ARTIFACT_FITTED_SHA256`,
+  `SAMPLE_ARTIFACT_PRODUCER`) before that branch runs again. That run has not been made; no hosted run of the regenerated
+  notebook blob is recorded.

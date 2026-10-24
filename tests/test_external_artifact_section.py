@@ -164,8 +164,8 @@ class _Estimator:
 
 
 def _standin(tmp_path: Path, P, monkeypatch, *, features: list[str] | None = None) -> tuple[Path, str]:
-    """A three-member artifact with a stand-in fitted archive and checkpoint; the package's pinned checkpoint digest is
-    overridden (test only) to the stand-in checkpoint's, so ``validate_artifact_bundle`` runs unchanged."""
+    """A four-member artifact with a stand-in fitted archive, checkpoint and safetensors conversion; the package's pinned
+    checkpoint and conversion digests are overridden (test only) to the stand-ins', so ``validate_artifact_bundle`` runs unchanged."""
     art = tmp_path / "standin-artifact"
     art.mkdir()
     with zipfile.ZipFile(art / P.FITTED_NAME, "w") as fitted:
@@ -174,11 +174,16 @@ def _standin(tmp_path: Path, P, monkeypatch, *, features: list[str] | None = Non
     (art / P.CHECKPOINT_NAME).write_bytes(hashlib.sha256(b"stand-in checkpoint").digest() * 128)
     ckpt_sha = hashlib.sha256((art / P.CHECKPOINT_NAME).read_bytes()).hexdigest()
     monkeypatch.setattr(P, "WEIGHTS_SHA256", ckpt_sha)
+    blob = (art / P.CHECKPOINT_NAME).read_bytes()
+    converted_sha = P.write_safetensors(art / P.CONVERTED_CHECKPOINT_NAME, {"blob": ("U8", [len(blob)], blob)}, {"config": "{}"})
+    monkeypatch.setattr(P, "WEIGHTS_SAFETENSORS_SHA256", converted_sha)
     features = features or [f"feature_{i:02d}" for i in range(12)]
     manifest = {
         "schemaVersion": P.ARTIFACT_SCHEMA_VERSION, "taskType": P.TASK_TYPE, "targetColumn": "target", "featureColumns": features,
         "classes": ["class_0", "class_1", "class_2"], "fittedEstimator": P.FITTED_NAME, "foundationCheckpoint": P.CHECKPOINT_NAME,
         "fittedEstimatorSha256": hashlib.sha256((art / P.FITTED_NAME).read_bytes()).hexdigest(), "foundationCheckpointSha256": ckpt_sha,
+        "convertedCheckpoint": P.CONVERTED_CHECKPOINT_NAME, "convertedCheckpointSha256": converted_sha,
+        "convertedCheckpointProvenance": {"derivedFrom": {"file": P.CHECKPOINT_NAME, "sha256": ckpt_sha}, "tool": P.SAFETENSORS_CONVERTER, "toolVersion": P.SAFETENSORS_CONVERTER_VERSION},
         "baseModel": {"modelId": P.MODEL_ID, "revision": P.MODEL_REVISION, "file": P.WEIGHTS_FILE, "sha256": ckpt_sha}, "mode": "zero-shot-icl",
         "nEstimators": 4, "randomState": 42, "featureKinds": {c: "numeric" for c in features},
     }
@@ -210,7 +215,7 @@ def test_section_runs_end_to_end_on_a_standin_artifact(tmp_path, monkeypatch) ->
     run = STAGES.Run(root, outputs, tmp_path / "weights", {"source": "pinned"})
     _quiet(STAGES.stage_external_artifact, run)
     record = json.loads((run.state / "external_artifact.json").read_text())
-    assert record["trusted_digest"].startswith("verified (pinned") and record["members"] == sorted([P.ARTIFACT_MANIFEST_NAME, P.CHECKPOINT_NAME, P.FITTED_NAME])
+    assert record["trusted_digest"].startswith("verified (pinned") and record["members"] == sorted(P.ARTIFACT_MEMBERS)
     assert record["data_contract"].startswith("synthetic default path")
     run.options = {}
     _quiet(STAGES.stage_external_reconstruct, run)
@@ -235,7 +240,14 @@ def test_members_are_checked_before_extraction(tmp_path, monkeypatch) -> None:
     """A ZIP with notes.txt, or with sub/model.ckpt that flattening would let overwrite model.ckpt, is refused."""
     P = STAGES.package(_root(tmp_path))
     good, _fitted = _standin(tmp_path, P, monkeypatch)
-    assert STAGES.check_members(P, good) == sorted([P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, P.CHECKPOINT_NAME])
+    assert STAGES.check_members(P, good) == sorted(P.ARTIFACT_MEMBERS)
+    legacy = tmp_path / "legacy.zip"  # a bundle from before the SER9 (b) conversion: no model.safetensors
+    with zipfile.ZipFile(good) as source, zipfile.ZipFile(legacy, "w") as target:
+        for info in source.infolist():
+            if info.filename != P.CONVERTED_CHECKPOINT_NAME:
+                target.writestr(info, source.read(info.filename))
+    with pytest.raises(ValueError, match=r"missing=\['model\.safetensors'\]"):
+        STAGES.check_members(P, legacy)
     extra = tmp_path / "extra.zip"
     shutil.copyfile(good, extra)
     with zipfile.ZipFile(extra, "a") as archive:
@@ -278,15 +290,15 @@ def test_deterministic_export_zip(tmp_path) -> None:
 
     art = tmp_path / "art"
     art.mkdir()
-    for name in (P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, P.CHECKPOINT_NAME):
+    for name in P.ARTIFACT_MEMBERS:
         (art / name).write_bytes(name.encode() * 100)
     first = P.zip_artifact_bundle(art, tmp_path / "a.zip")
-    for name in (P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, P.CHECKPOINT_NAME):  # new mtimes, same bytes
+    for name in P.ARTIFACT_MEMBERS:  # new mtimes, same bytes
         (art / name).write_bytes(name.encode() * 100)
     assert P.zip_artifact_bundle(art, tmp_path / "b.zip") == first
     with zipfile.ZipFile(tmp_path / "a.zip") as archive:
         infos = archive.infolist()
-    assert [i.filename for i in infos] == sorted([P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, P.CHECKPOINT_NAME])
+    assert [i.filename for i in infos] == sorted(P.ARTIFACT_MEMBERS)
     assert all(i.date_time == (1980, 1, 1, 0, 0, 0) and (i.external_attr >> 16) & 0o777 == 0o644 for i in infos)
     assert not (tmp_path / "a.zip.part").exists()
 
