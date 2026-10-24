@@ -25,7 +25,22 @@ load when picklescan stops early: joblib's own reader runs with find_class repla
 numpy's array and scalar rebuilders, numpy.dtype and joblib's NumpyArrayWrapper are real; every
 other global is an inert stub, recorded, and classified with picklescan's own tables. Payloads of
 torch.storage._load_from_bytes are captured as files and scanned like any other file, never loaded.
-Not covered: data a loader decompresses or decodes with no format marker (for example raw deflate).
+Threat model and scope (frozen 2026-10-24; review findings inside it are fixed, findings outside it
+are recorded as out of scope):
+  Goal: before an asset is published, find every byte sequence in it that a standard loader could
+  unpickle, and report whether it references a callable picklescan classifies as dangerous.
+  In scope: zip and tar archives at any depth; pickle streams of any protocol under any file name,
+  and in front of an archive; PyTorch zip and legacy checkpoints; joblib files; object-dtype .npy
+  and .npz; torch payloads embedded through torch.storage._load_from_bytes.
+  Out of scope, reported incomplete where recognised, otherwise not detected:
+  - data a loader decodes before unpickling with no format marker (raw deflate, base64, custom or
+    encrypted encodings);
+  - code that is not pickle (Python source, notebooks, TorchScript, ONNX custom operators, shared
+    libraries) and loaders that read a pickle from a non-standard offset inside another format;
+  - harm done through callables picklescan classifies as safe or suspicious (for example a library
+    constructor with side effects): picklescan's tables are the policy, not a judgement made here.
+  Assumes: the scanned bytes are the bytes that get published (the asset digest is pinned), and the
+  environment running the scan is trusted.
 
 Exit status: 0 all clean; 1 any dangerous; 2 any incomplete (and none dangerous); 3 the asset could
 not be scanned (bad archive, unsafe or duplicate member, unexpected error). The report holds only
