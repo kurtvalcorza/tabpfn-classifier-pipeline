@@ -8,7 +8,8 @@ authors = [{ name = "Kurt Valcorza" }]
 # Exact runtime pins (NOTEBOOK_SPEC 1.1 ENV2/PAR2): the standalone tutorials carry this list verbatim as their
 # inline PINS. torch / tabpfn / pandas / scikit-learn are the previous tutorials/requirements-colab.txt pins
 # (= the finetuner's requirements at the COMPONENTS.json commit); huggingface-hub is the fleet pin and stages the
-# pinned checkpoint. requests / boto3 / nbformat were worker- and harness-only and are not runtime deps.
+# pinned checkpoint. safetensors reads and writes the served conversion of that checkpoint (already in the lock as a
+# tabpfn dependency). requests / boto3 / nbformat were worker- and harness-only and are not runtime deps.
 dependencies = [
   "torch==2.11.0",
   "torchvision==0.26.0",
@@ -16,6 +17,7 @@ dependencies = [
   "pandas==2.3.2",
   "scikit-learn==1.9.0",
   "huggingface-hub==0.36.2",
+  "safetensors==0.8.0",
 ]
 [project.optional-dependencies]
 dev = ["pytest==8.4.1", "ruff==0.16.6", "nbformat==5.10.4", "nbclient==0.11.0", "jsonschema==4.25.1"]

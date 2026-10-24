@@ -1,0 +1,229 @@
+[colab] Parsing notebook '<local-run-dir>/tabpfn_classifier_colab_641152f_colab-cli-t4.ipynb'...
+[colab] Executing cell 1/14 - Infrastructure: check the runtime, accelerator and disk; create (or keep) the run directory...
+{'accelerator': 'Tesla T4, 15360 MiB', 'kernel_python': '3.13.16', 'run_directory': '/content/dimer_runs/tabpfn_classifier/9fce1d3ee7a1', 'outputs': '/content/outputs', 'weights': '/content/weights', 'environment_root': '/tmp/dimer_uv', 'free_gib': {'weights': 193.2, 'environment': 193.2}}
+[colab] Executing cell 2/14 - Infrastructure: write and verify the carried package, stage runner, lock, manifest and samples...
+{'carried_files': 7, 'verified': True, 'repository': 'kurtvalcorza/tabpfn-classifier-pipeline', 'revision': '057ab9de6d1e090ef6f0a82813dc005fd3df8e40', 'generator': 'build_notebook.py/3.0-tabular'}
+[colab] Executing cell 3/14 - Infrastructure: build (or reuse) the isolated locked environment and define the stage runner...
+{'notebook_source': '057ab9de6d1e090ef6f0a82813dc005fd3df8e40', 'python': '3.12.12', 'torch': '2.11.0', 'tabpfn': '8.1.0', 'numpy': '2.5.3', 'pandas': '2.3.2', 'scikit-learn': '1.9.0', 'cuda': True, 'locked_packages': 63, 'environment': '/tmp/dimer_uv/venv-22613682882ebc1b', 'environment_reused': False, 'setup_seconds': 51}
+[colab] Executing cell 4/14 - Infrastructure: stage and digest-verify the pinned checkpoint...
+Running stage 'weights' in the isolated environment; log: /content/dimer_runs/tabpfn_classifier/9fce1d3ee7a1/logs/weights.log
+{'model_id': 'Prior-Labs/tabpfn_3', 'revision': '24a16a89d245878b846555110985634aa2e656d7', 'license': 'tabpfn-3-license-v1.0', 'files': 4, 'total_bytes': 212830007}
+{'weights_dir': '/content/weights/tabpfn-3-classifier', 'fetched': ['LICENSE', 'README.md', 'config.json', 'tabpfn-v3-classifier-v3_default.ckpt']}
+{'verified_files': 4, 'revision': '24a16a89d245878b846555110985634aa2e656d7', 'checkpoint': 'tabpfn-v3-classifier-v3_default.ckpt', 'sha256': 'd0d865d54dfbc524f5703104be90620182dca7e5fb2c16de72e9959ea18f3988'}
+[colab] Executing cell 5/14 - tabpfn_classifier-14...
+Running stage 'data' in the isolated environment; log: /content/dimer_runs/tabpfn_classifier/9fce1d3ee7a1/logs/data.log
+{'sample_kind': 'synthetic', 'type': 'deterministic synthetic tutorial sample', 'generator': 'build_synthetic_dataset', 'rows': {'train': 420, 'val': 90, 'test': 90}, 'features': 12, 'classes': 3, 'seed': 42, 'dataset_sha256': 'ee2e18138e17a109714398d81a051d0729f7d9e169e267d8561b6f0895effb0c', 'target': 'target', 'drop_columns': ['record_id', 'category'], 'text_columns': [], 'splits': 'explicit train/val/test from the dataset'}
+class counts (train): {'class_0': 139, 'class_1': 142, 'class_2': 139}
+DROP_COLUMNS ['record_id', 'category']: kept beside the predictions as identifiers, never given to the model.
+[colab] Executing cell 6/14 - tabpfn_classifier-17...
+Running stage 'validate' in the isolated environment; log: /content/dimer_runs/tabpfn_classifier/9fce1d3ee7a1/logs/validate.log
+{'ceilings': {'MAX_TRAIN_ROWS': 1000000, 'MAX_FEATURES': 2000, 'MAX_CLASSES': 160, 'MIN_CLASSES': 2, 'MIN_ROWS_PER_CLASS': 2}, 'decision_rule': 'argmax', 'model_version': 'v3'}
+{
+  "id": "deterministic synthetic tutorial sample",
+  "mode": "in-context-fit",
+  "target_column": "target",
+  "classes": [
+    "class_0",
+    "class_1",
+    "class_2"
+  ],
+  "numeric_features": 12,
+  "categorical_features": 0,
+  "splits": {
+    "train": {
+      "rows": 420,
+      "class_counts": {
+        "class_0": 139,
+        "class_1": 142,
+        "class_2": 139
+      }
+    },
+    "val": {
+      "rows": 90,
+      "class_counts": {
+        "class_0": 30,
+        "class_1": 30,
+        "class_2": 30
+      }
+    },
+    "test": {
+      "rows": 90,
+      "class_counts": {
+        "class_0": 30,
+        "class_1": 30,
+        "class_2": 30
+      }
+    }
+  },
+  "drop_columns": [
+    "record_id",
+    "category"
+  ]
+}
+findings: [
+  {
+    "input": "renamed-target-probe",
+    "code": "TARGET_MISSING",
+    "verdict": "rejected",
+    "message": "train.csv: target column 'target' not present",
+    "observed": [
+      "feature_00",
+      "feature_01",
+      "feature_02",
+      "feature_03",
+      "feature_04",
+      "feature_05",
+      "feature_06",
+      "feature_07",
+      "feature_08",
+      "feature_09",
+      "feature_10",
+      "feature_11",
+      "label"
+    ]
+  }
+]
+majority-class baseline on val.csv {'majorityClass': 'class_1', 'trainClassCounts': {'class_0': 139, 'class_1': 142, 'class_2': 139}, 'accuracy': 0.3333, 'balancedAccuracy': 0.3333, 'logLoss': 1.0987}
+[colab] Executing cell 7/14 - tabpfn_classifier-20...
+Running stage 'condition' in the isolated environment; log: /content/dimer_runs/tabpfn_classifier/9fce1d3ee7a1/logs/condition.log
+/tmp/dimer_uv/venv-22613682882ebc1b/lib/python3.12/site-packages/sklearn/metrics/_classification.py:304: UserWarning: The y_prob values do not sum to one. Make sure to pass probabilities.
+  warnings.warn(
+/tmp/dimer_uv/venv-22613682882ebc1b/lib/python3.12/site-packages/sklearn/metrics/_classification.py:304: UserWarning: The y_prob values do not sum to one. Make sure to pass probabilities.
+  warnings.warn(
+{
+  "mode": "zero-shot-icl (in-context conditioning, no gradient update)",
+  "device": "cuda",
+  "n_estimators": 4,
+  "seed": 42,
+  "classes": [
+    "class_0",
+    "class_1",
+    "class_2"
+  ],
+  "validation": {
+    "accuracy": 0.9778,
+    "balancedAccuracy": 0.9778,
+    "logLoss": 0.0658,
+    "rocAuc": 0.9994
+  },
+  "test": {
+    "accuracy": 0.9778,
+    "balancedAccuracy": 0.9778,
+    "logLoss": 0.0794,
+    "rocAuc": 0.9978
+  }
+}
+Adaptation: in-context conditioning is this tutorial's adaptation; the production pipeline's gradient fine-tuning (Prior Labs' FinetunedTabPFNClassifier, default on, large-GPU) is not run here — the same fallback production uses without a large GPU. Proposed RUN7 deviation, pending maintainer approval.
+[colab] Executing cell 8/14 - tabpfn_classifier-23...
+Running stage 'report' in the isolated environment; log: /content/dimer_runs/tabpfn_classifier/9fce1d3ee7a1/logs/report.log
+{
+  "verdict": "sample-sanity",
+  "reason": "90 validation row(s) from one holdout; tutorial evidence, not a benchmark",
+  "decision_rule": "argmax",
+  "n_validation": 90,
+  "validation_errors": {
+    "tabpfn": 2,
+    "majority_class": 60,
+    "standardised_logistic_regression": 8
+  },
+  "classical_reference": {
+    "id": "standardised_logistic_regression",
+    "features": "numeric features only",
+    "validation": {
+      "accuracy": 0.9111,
+      "balancedAccuracy": 0.9111,
+      "errors": 8
+    },
+    "test": {
+      "accuracy": 0.9444,
+      "balancedAccuracy": 0.9444,
+      "errors": 5
+    },
+    "validation_rows": 90,
+    "one_row_resolution": 0.0111
+  },
+  "interpretation": "One validation row is 0.0111 of accuracy (90 rows); differences of a row or two between models are within that resolution, and no dispersion over splits was measured."
+}
+[colab] Executing cell 9/14 - tabpfn_classifier-26...
+Running stage 'export' in the isolated environment; log: /content/dimer_runs/tabpfn_classifier/9fce1d3ee7a1/logs/export.log
+{'artifact': ['artifact_manifest.json', 'model.ckpt', 'model.tabpfn_fit'], 'fittedEstimatorSha256': 'b48245dbadcd9454c6c2503337a82657d40e3601f8a7a6700027d32bc326411e', 'foundationCheckpointSha256': 'd0d865d54dfbc524f5703104be90620182dca7e5fb2c16de72e9959ea18f3988', 'bundle_zip': 'tabpfn_classifier_artifact.zip', 'bundle_zip_sha256': '888db6e4c2c45d8e9fd153b871defea16e6d83b46270f24837161f35547121ac'}
+Trusted digests of this export: whoever loads tabpfn_classifier_artifact.zip elsewhere checks EXPECTED_ZIP_SHA256 = '888db6e4c2c45d8e9fd153b871defea16e6d83b46270f24837161f35547121ac' and EXPECTED_FITTED_SHA256 = 'b48245dbadcd9454c6c2503337a82657d40e3601f8a7a6700027d32bc326411e'. Section 10 never loads this run's export; it loads the pinned sample artifact.
+Running stage 'reload' in the isolated environment; log: /content/dimer_runs/tabpfn_classifier/9fce1d3ee7a1/logs/reload.log
+{
+  "rows": 90,
+  "maxAbsProbabilityDifference": 0.0,
+  "rtol": 1e-05,
+  "atol": 1e-06,
+  "labelsIdentical": true,
+  "recordedAccuracy": 0.97777778,
+  "recordedModelPath": "/content/weights/tabpfn-3-classifier/tabpfn-v3-classifier-v3_default.ckpt",
+  "process": "fresh (separate from the exporting stage)"
+}
+Fresh-boundary verification PASSED: probabilities equivalent on 90 validation rows (rtol=1e-05, atol=1e-06).
+[colab] Executing cell 10/14 - tabpfn_classifier-29...
+Running stage 'predict' in the isolated environment; log: /content/dimer_runs/tabpfn_classifier/9fce1d3ee7a1/logs/predict.log
+scored rows drawn from: first 8 rows of test.csv (held out from the in-context support), target removed
+Their unlabelled copy, with ['category', 'record_id'] identifier column(s), is outputs/tabpfn_classifier_new_rows.csv.
+ category record_id prediction  proba_class_0  proba_class_1  proba_class_2
+segment_3 row-00427    class_1         0.0001         0.9974         0.0025
+segment_0 row-00156    class_2         0.0096         0.0119         0.9785
+segment_1 row-00381    class_2         0.0032         0.0074         0.9894
+segment_1 row-00317    class_2         0.0181         0.0087         0.9732
+segment_2 row-00286    class_2         0.0112         0.0039         0.9849
+segment_3 row-00435    class_1         0.0000         0.9985         0.0015
+segment_0 row-00120    class_1         0.0003         0.9940         0.0058
+segment_0 row-00272    class_2         0.0036         0.0036         0.9927
+[colab] Executing cell 11/14 - tabpfn_classifier-33...
+Running stage 'external_artifact' in the isolated environment; log: /content/dimer_runs/tabpfn_classifier/9fce1d3ee7a1/logs/external_artifact.log
+{'artifact': 'pinned sample artifact (created outside this run)', 'url': 'https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/sample-artifact-synthetic-v1/tabpfn_classifier_artifact.zip', 'pinned_sha256': '8fe248e2f9841c452316d07ee3e88e5fcde89ec458ff630954028b1c22df1054', 'bytes': 197068508, 'pinned_fitted_sha256': '1f48ecaf118c834633c8c000579e3f68227cf11c9ae0b146b68509f6f3bb9af6', 'producer': {'notebook': 'tutorials/tabpfn_classifier_colab.ipynb (default path: the deterministic synthetic sample, seed 42)', 'commit': '7fce7f931e9f65c7d406d436b912f754d3cfb1d1', 'run': 'recorded hosted Colab T4 run; the release notes of the tag name the run record (SART8)', 'release_tag': 'sample-artifact-synthetic-v1'}, 'format': 'artifact_manifest.json schemaVersion 1 + model.tabpfn_fit + model.ckpt', 'integrity': 'SHA-256 of the whole ZIP, checked before extraction; then the member list, the fitted archive against its pinned digest, and the checkpoint against the pinned base model'}
+{'source': 'pinned', 'zip': 'external_artifact.zip', 'zip_sha256': '8fe248e2f9841c452316d07ee3e88e5fcde89ec458ff630954028b1c22df1054', 'trusted_digest': 'verified (pinned SAMPLE_ARTIFACT_SHA256 and SAMPLE_ARTIFACT_FITTED_SHA256)', 'mode': 'zero-shot-icl', 'checkpoint_binding': 'identical to the pinned base checkpoint (SHA-256 checked)', 'data_contract': 'synthetic default path (features, target, classes and feature kinds match)'}
+{'schemaVersion': 1, 'taskType': 'tabular_classification', 'baseModel': {'modelId': 'Prior-Labs/tabpfn_3', 'revision': '24a16a89d245878b846555110985634aa2e656d7', 'file': 'tabpfn-v3-classifier-v3_default.ckpt', 'sha256': 'd0d865d54dfbc524f5703104be90620182dca7e5fb2c16de72e9959ea18f3988', 'modelVersion': 'v3', 'license': 'tabpfn-3-license-v1.0'}, 'nEstimators': 4, 'randomState': 42, 'fittedEstimatorSha256': '1f48ecaf118c834633c8c000579e3f68227cf11c9ae0b146b68509f6f3bb9af6', 'foundationCheckpointSha256': 'd0d865d54dfbc524f5703104be90620182dca7e5fb2c16de72e9959ea18f3988'}
+{'featureColumns': 12, 'targetColumn': 'target', 'classes': ['class_0', 'class_1', 'class_2'], 'featureKinds': ['numeric']}
+[colab] Executing cell 12/14 - tabpfn_classifier-36...
+Running stage 'external_reconstruct' in the isolated environment; log: /content/dimer_runs/tabpfn_classifier/9fce1d3ee7a1/logs/external_reconstruct.log
+{'source': 'artifact', 'device': 'cuda', 'classes': ['class_0', 'class_1', 'class_2'], 'features': 12, 'n_estimators': 4, 'random_state': 42, 'refit': False, 'network_fallback_for_weights': False, 'checkpoint_binding': 'identical to the pinned base checkpoint (SHA-256 checked)'}
+[colab] Executing cell 13/14 - tabpfn_classifier-38...
+Running stage 'external_predict' in the isolated environment; log: /content/dimer_runs/tabpfn_classifier/9fce1d3ee7a1/logs/external_predict.log
+scored rows drawn from: synthetic-test-first-8-rows.csv (sample)
+ category record_id prediction  proba_class_0  proba_class_1  proba_class_2
+segment_3 row-00427    class_1         0.0001         0.9974         0.0025
+segment_0 row-00156    class_2         0.0096         0.0119         0.9785
+segment_1 row-00381    class_2         0.0032         0.0074         0.9894
+segment_1 row-00317    class_2         0.0181         0.0087         0.9732
+segment_2 row-00286    class_2         0.0112         0.0039         0.9849
+segment_3 row-00435    class_1         0.0000         0.9985         0.0015
+segment_0 row-00120    class_1         0.0003         0.9940         0.0058
+segment_0 row-00272    class_2         0.0036         0.0036         0.9927
+{'outputs': ['outputs/external_artifact/tabpfn_classifier_external_predictions.csv', 'outputs/external_artifact/tabpfn_classifier_external_result.json'], 'input_kind': 'sample', 'artifact_source': 'pinned', 'zip_sha256': '8fe248e2f9841c452316d07ee3e88e5fcde89ec458ff630954028b1c22df1054'}
+[colab] Executing cell 14/14 - tabpfn_classifier-41...
+Running stage 'activity' in the isolated environment; log: /content/dimer_runs/tabpfn_classifier/9fce1d3ee7a1/logs/activity.log
+/tmp/dimer_uv/venv-22613682882ebc1b/lib/python3.12/site-packages/sklearn/metrics/_classification.py:304: UserWarning: The y_prob values do not sum to one. Make sure to pass probabilities.
+  warnings.warn(
+{
+  "changed": {
+    "n_estimators": [
+      4,
+      1
+    ]
+  },
+  "validation": {
+    "canonical": {
+      "accuracy": 0.9778,
+      "balancedAccuracy": 0.9778,
+      "logLoss": 0.0658,
+      "rocAuc": 0.9994
+    },
+    "changed": {
+      "accuracy": 0.9778,
+      "balancedAccuracy": 0.9778,
+      "logLoss": 0.0607,
+      "rocAuc": 0.9998
+    }
+  },
+  "validation_rows": 90,
+  "one_row_resolution": 0.0111,
+  "max_abs_probability_change": 0.1001,
+  "labels_changed": 0
+}
+{'canonical_outputs_unchanged': True}
+[colab] Saving notebook with outputs to '<local-run-dir>/tabpfn_classifier_colab_641152f_colab-cli-t4_output.ipynb'...
