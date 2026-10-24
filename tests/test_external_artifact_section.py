@@ -163,9 +163,10 @@ class _Estimator:
         return np.tile([0.6, 0.3, 0.1], (len(X), 1))
 
 
-def _standin(tmp_path: Path, P, monkeypatch, *, features: list[str] | None = None) -> tuple[Path, str]:
-    """A three-member artifact with a stand-in fitted archive and checkpoint; the package's pinned checkpoint digest is
-    overridden (test only) to the stand-in checkpoint's, so ``validate_artifact_bundle`` runs unchanged."""
+def _standin(tmp_path: Path, P, monkeypatch, *, features: list[str] | None = None, legacy: bool = False) -> tuple[Path, str]:
+    """A four-member artifact with a stand-in fitted archive, checkpoint and safetensors conversion; the package's pinned
+    checkpoint and conversion digests are overridden (test only) to the stand-ins', so ``validate_artifact_bundle`` runs unchanged.
+    ``legacy`` builds the three-member shape of the pinned v1 sample (no ``model.safetensors``, no safetensors manifest keys)."""
     art = tmp_path / "standin-artifact"
     art.mkdir()
     with zipfile.ZipFile(art / P.FITTED_NAME, "w") as fitted:
@@ -174,17 +175,27 @@ def _standin(tmp_path: Path, P, monkeypatch, *, features: list[str] | None = Non
     (art / P.CHECKPOINT_NAME).write_bytes(hashlib.sha256(b"stand-in checkpoint").digest() * 128)
     ckpt_sha = hashlib.sha256((art / P.CHECKPOINT_NAME).read_bytes()).hexdigest()
     monkeypatch.setattr(P, "WEIGHTS_SHA256", ckpt_sha)
+    blob = (art / P.CHECKPOINT_NAME).read_bytes()
+    converted_sha = P.write_safetensors(art / P.SAFETENSORS_NAME, {"blob": ("U8", [len(blob)], blob)}, {"config": "{}"})
+    monkeypatch.setattr(P, "WEIGHTS_SAFETENSORS_SHA256", converted_sha)
     features = features or [f"feature_{i:02d}" for i in range(12)]
     manifest = {
         "schemaVersion": P.ARTIFACT_SCHEMA_VERSION, "taskType": P.TASK_TYPE, "targetColumn": "target", "featureColumns": features,
         "classes": ["class_0", "class_1", "class_2"], "fittedEstimator": P.FITTED_NAME, "foundationCheckpoint": P.CHECKPOINT_NAME,
         "fittedEstimatorSha256": hashlib.sha256((art / P.FITTED_NAME).read_bytes()).hexdigest(), "foundationCheckpointSha256": ckpt_sha,
+        "safetensorsWeights": P.SAFETENSORS_NAME, "safetensorsWeightsSha256": converted_sha,
+        "safetensorsConversion": {"derived_from": {"file": P.CHECKPOINT_NAME, "sha256": ckpt_sha}, "tool": "safetensors", "toolVersion": "0.8.0", "converter": P.SAFETENSORS_CONVERTER},
         "baseModel": {"modelId": P.MODEL_ID, "revision": P.MODEL_REVISION, "file": P.WEIGHTS_FILE, "sha256": ckpt_sha}, "mode": "zero-shot-icl",
         "nEstimators": 4, "randomState": 42, "featureKinds": {c: "numeric" for c in features},
     }
+    if legacy:
+        (art / P.SAFETENSORS_NAME).unlink()
+        manifest = {k: v for k, v in manifest.items() if not k.startswith("safetensors")}
     (art / P.ARTIFACT_MANIFEST_NAME).write_text(json.dumps(manifest), encoding="utf-8")
     zip_path = tmp_path / "tabpfn_classifier_artifact.zip"
-    P.zip_artifact_bundle(art, zip_path)
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        for name in sorted(p.name for p in art.iterdir()):
+            archive.write(art / name, name)
     original = P.TabPFNClassifierPipeline.from_artifact.__func__
     monkeypatch.setattr(P.TabPFNClassifierPipeline, "from_artifact", classmethod(functools.partial(original, loader=lambda fitted, device: _Estimator())))
     return zip_path, manifest["fittedEstimatorSha256"]
@@ -196,13 +207,17 @@ def _cpu(monkeypatch) -> None:
     monkeypatch.setattr(importlib.metadata, "version", lambda name: "8.1.0" if name == "tabpfn" else real(name))
 
 
-def test_section_runs_end_to_end_on_a_standin_artifact(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("legacy", [False, True], ids=["four-member", "pinned-v1-predates-safetensors"])
+def test_section_runs_end_to_end_on_a_standin_artifact(tmp_path, monkeypatch, legacy: bool) -> None:
     """The three stages, in order, against a stand-in served from file:// with a test-only URL/digest override:
-    digest before extraction, members, bundle digests, base model, SART10 contract, reconstruction, prediction."""
+    digest before extraction, members, bundle digests, base model, SART10 contract, reconstruction, prediction. With
+    ``SAMPLE_ARTIFACT_PREDATES_SAFETENSORS`` the pinned sample may be the three-member v1 shape and loads from model.ckpt;
+    without it the pinned sample must carry model.safetensors and loads from it."""
     _cpu(monkeypatch)
     root = _root(tmp_path)
     P = STAGES.package(root)
-    zip_path, fitted = _standin(tmp_path, P, monkeypatch)
+    monkeypatch.setattr(STAGES, "SAMPLE_ARTIFACT_PREDATES_SAFETENSORS", legacy)
+    zip_path, fitted = _standin(tmp_path, P, monkeypatch, legacy=legacy)
     monkeypatch.setattr(STAGES, "SAMPLE_ARTIFACT_URL", zip_path.resolve().as_uri())
     monkeypatch.setattr(STAGES, "SAMPLE_ARTIFACT_SHA256", hashlib.sha256(zip_path.read_bytes()).hexdigest())
     monkeypatch.setattr(STAGES, "SAMPLE_ARTIFACT_FITTED_SHA256", fitted)
@@ -210,7 +225,9 @@ def test_section_runs_end_to_end_on_a_standin_artifact(tmp_path, monkeypatch) ->
     run = STAGES.Run(root, outputs, tmp_path / "weights", {"source": "pinned"})
     _quiet(STAGES.stage_external_artifact, run)
     record = json.loads((run.state / "external_artifact.json").read_text())
-    assert record["trusted_digest"].startswith("verified (pinned") and record["members"] == sorted([P.ARTIFACT_MANIFEST_NAME, P.CHECKPOINT_NAME, P.FITTED_NAME])
+    expected_members = sorted(set(P.ARTIFACT_MEMBERS) - ({P.SAFETENSORS_NAME} if legacy else set()))
+    assert record["trusted_digest"].startswith("verified (pinned") and record["members"] == expected_members
+    assert record["weights_source"] == (P.CHECKPOINT_NAME if legacy else P.SAFETENSORS_NAME)
     assert record["data_contract"].startswith("synthetic default path")
     run.options = {}
     _quiet(STAGES.stage_external_reconstruct, run)
@@ -235,7 +252,14 @@ def test_members_are_checked_before_extraction(tmp_path, monkeypatch) -> None:
     """A ZIP with notes.txt, or with sub/model.ckpt that flattening would let overwrite model.ckpt, is refused."""
     P = STAGES.package(_root(tmp_path))
     good, _fitted = _standin(tmp_path, P, monkeypatch)
-    assert STAGES.check_members(P, good) == sorted([P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, P.CHECKPOINT_NAME])
+    assert STAGES.check_members(P, good) == sorted(P.ARTIFACT_MEMBERS)
+    legacy = tmp_path / "legacy.zip"  # a bundle from before the SER9 (b) conversion: no model.safetensors
+    with zipfile.ZipFile(good) as source, zipfile.ZipFile(legacy, "w") as target:
+        for info in source.infolist():
+            if info.filename != P.SAFETENSORS_NAME:
+                target.writestr(info, source.read(info.filename))
+    with pytest.raises(ValueError, match=r"missing=\['model\.safetensors'\]"):
+        STAGES.check_members(P, legacy)
     extra = tmp_path / "extra.zip"
     shutil.copyfile(good, extra)
     with zipfile.ZipFile(extra, "a") as archive:
@@ -278,15 +302,15 @@ def test_deterministic_export_zip(tmp_path) -> None:
 
     art = tmp_path / "art"
     art.mkdir()
-    for name in (P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, P.CHECKPOINT_NAME):
+    for name in P.ARTIFACT_MEMBERS:
         (art / name).write_bytes(name.encode() * 100)
     first = P.zip_artifact_bundle(art, tmp_path / "a.zip")
-    for name in (P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, P.CHECKPOINT_NAME):  # new mtimes, same bytes
+    for name in P.ARTIFACT_MEMBERS:  # new mtimes, same bytes
         (art / name).write_bytes(name.encode() * 100)
     assert P.zip_artifact_bundle(art, tmp_path / "b.zip") == first
     with zipfile.ZipFile(tmp_path / "a.zip") as archive:
         infos = archive.infolist()
-    assert [i.filename for i in infos] == sorted([P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, P.CHECKPOINT_NAME])
+    assert [i.filename for i in infos] == sorted(P.ARTIFACT_MEMBERS)
     assert all(i.date_time == (1980, 1, 1, 0, 0, 0) and (i.external_attr >> 16) & 0o777 == 0o644 for i in infos)
     assert not (tmp_path / "a.zip.part").exists()
 
@@ -397,3 +421,25 @@ def test_st1_real_notebook_passes_the_validator() -> None:
     runner = VALIDATOR.carried_runner(E2E)
     assert VALIDATOR.disallowed_own_references(runner, (VALIDATOR.PINNED_SAMPLE_ARTIFACT_URL,)) == []
     VALIDATOR.validate_notebooks()
+
+
+def test_only_the_pinned_sample_may_omit_safetensors(tmp_path, monkeypatch) -> None:
+    """The SAMPLE_ARTIFACT_PREDATES_SAFETENSORS allowance covers the pinned sample only: a learner's own three-member ZIP
+    is refused at the member check, and a four-member pinned sample is refused while the flag says it predates it."""
+    _cpu(monkeypatch)
+    root = _root(tmp_path)
+    P = STAGES.package(root)
+    monkeypatch.setattr(STAGES, "SAMPLE_ARTIFACT_PREDATES_SAFETENSORS", True)
+    (tmp_path / "legacy").mkdir()
+    (tmp_path / "four").mkdir()
+    legacy_zip, _fitted = _standin(tmp_path / "legacy", P, monkeypatch, legacy=True)
+    run = STAGES.Run(root, tmp_path / "outputs", tmp_path / "weights", {"source": "own", "zip_path": str(legacy_zip), "expected_zip_sha256": ""})
+    with pytest.raises(STAGES.Refused, match=r"missing=\['model\.safetensors'\]"):
+        _quiet(STAGES.stage_external_artifact, run)
+    four_zip, fitted = _standin(tmp_path / "four", P, monkeypatch)
+    monkeypatch.setattr(STAGES, "SAMPLE_ARTIFACT_URL", four_zip.resolve().as_uri())
+    monkeypatch.setattr(STAGES, "SAMPLE_ARTIFACT_SHA256", hashlib.sha256(four_zip.read_bytes()).hexdigest())
+    monkeypatch.setattr(STAGES, "SAMPLE_ARTIFACT_FITTED_SHA256", fitted)
+    run.options = {"source": "pinned"}
+    with pytest.raises(ValueError, match=r"unexpected=\['model\.safetensors'\]"):
+        _quiet(STAGES.stage_external_artifact, run)

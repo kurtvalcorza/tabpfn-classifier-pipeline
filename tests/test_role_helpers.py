@@ -48,11 +48,18 @@ def fake_saver(model: FakeClassifier, path: Path) -> None:
         archive.writestr("fitted_attrs.joblib", json.dumps({"classes": [str(c) for c in model.classes_], "freq": list(map(float, model._freq))}) + "x" * 2048)
 
 
+def fake_converter(checkpoint: Path, destination: Path) -> dict:
+    """Stands in for convert_checkpoint_to_safetensors without torch: the checkpoint's bytes as one U8 tensor."""
+    blob = checkpoint.read_bytes()
+    digest = api.write_safetensors(destination, {"blob": ("U8", [len(blob)], blob)}, {"config": api.metadata_json({"stand_in": True})})
+    return {"sha256": digest, "tool": "safetensors", "toolVersion": "0.8.0", "torchVersion": "2.11.0", "converter": api.SAFETENSORS_CONVERTER, "converterVersion": api.SAFETENSORS_CONVERTER_VERSION, "layout": api.SAFETENSORS_LAYOUT, "tensorCount": 1, "tensorBytes": len(blob), "metadataKeys": ["config"], "bitwiseEqual": True}
+
+
 def fake_loader(fitted: Path, device: str) -> FakeClassifier:
     with zipfile.ZipFile(fitted) as archive:
         params = json.loads(archive.read("init_params.json"))
         state = json.loads(archive.read("fitted_attrs.joblib").decode("utf-8").rstrip("x"))
-    assert Path(params["model_path"]).name == api.CHECKPOINT_NAME  # rewritten to the companion checkpoint
+    assert Path(params["model_path"]).name == api.SAFETENSORS_NAME  # rewritten to the companion safetensors conversion
     model = FakeClassifier()
     model.classes_ = np.asarray(state["classes"])
     model._freq = np.asarray(state["freq"], dtype=float)
@@ -233,9 +240,14 @@ def test_fit_predict_evaluate_save_and_reload(tmp_path: Path, constants: None) -
         pipe.predict(val)  # carries the target column
 
     artifact = tmp_path / "artifact"
-    manifest = pipe.save_artifact(artifact, saver=fake_saver)
+    manifest = pipe.save_artifact(artifact, saver=fake_saver, converter=fake_converter)
     assert manifest["classes"] == ["x", "y"] and manifest["baseModel"]["sha256"] == api.WEIGHTS_SHA256
     assert api.sha256_file(artifact / api.CHECKPOINT_NAME) == api.WEIGHTS_SHA256
+    provenance = manifest["safetensorsConversion"]
+    assert manifest["safetensorsWeights"] == api.SAFETENSORS_NAME and manifest["safetensorsWeightsSha256"] == api.sha256_file(artifact / api.SAFETENSORS_NAME)
+    assert provenance["derived_from"] == {"file": api.CHECKPOINT_NAME, "sha256": api.WEIGHTS_SHA256} and provenance["converter"] == api.SAFETENSORS_CONVERTER
+    assert (provenance["tool"], provenance["toolVersion"], provenance["layout"], provenance["ser9Clause"]) == ("safetensors", "0.8.0", api.SAFETENSORS_LAYOUT, "b")
+    assert provenance["bitwiseEqual"] is True and provenance["tensorCount"] == 1 and "sha256" not in provenance
     checked = api.validate_artifact_bundle(artifact)
     assert checked["verifiedSha256"]["fittedEstimator"] == manifest["fittedEstimatorSha256"] and checked["recordedModelPath"] == "fake"
     with pytest.raises(ValueError, match="expected"):
@@ -243,11 +255,11 @@ def test_fit_predict_evaluate_save_and_reload(tmp_path: Path, constants: None) -
 
     bundle_zip = tmp_path / "bundle.zip"
     assert api.zip_artifact_bundle(artifact, bundle_zip) == api.sha256_file(bundle_zip)
-    assert sorted(api.safe_extract_zip(bundle_zip, tmp_path / "unzipped")) == sorted([api.ARTIFACT_MANIFEST_NAME, api.FITTED_NAME, api.CHECKPOINT_NAME])
+    assert sorted(api.safe_extract_zip(bundle_zip, tmp_path / "unzipped")) == sorted(api.ARTIFACT_MEMBERS)
     assert api.validate_artifact_bundle(tmp_path / "unzipped")["classes"] == manifest["classes"]
     fresh = tmp_path / "fresh"
     fresh.mkdir()
-    for name in (api.FITTED_NAME, api.CHECKPOINT_NAME, api.ARTIFACT_MANIFEST_NAME):
+    for name in api.ARTIFACT_MEMBERS:
         (fresh / name).write_bytes((artifact / name).read_bytes())
     reloaded = api.TabPFNClassifierPipeline.from_artifact(fresh, device="cpu", loader=fake_loader)
     assert reloaded.source == "artifact" and reloaded.classes == ["x", "y"] and reloaded.feature_columns == features
