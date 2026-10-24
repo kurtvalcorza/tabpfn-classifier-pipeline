@@ -61,6 +61,10 @@ SAMPLE_ARTIFACT_URL = "https://github.com/kurtvalcorza/tabpfn-classifier-pipelin
 SAMPLE_ARTIFACT_SHA256 = "8fe248e2f9841c452316d07ee3e88e5fcde89ec458ff630954028b1c22df1054"
 SAMPLE_ARTIFACT_BYTES = 197068508
 SAMPLE_ARTIFACT_FITTED_SHA256 = "1f48ecaf118c834633c8c000579e3f68227cf11c9ae0b146b68509f6f3bb9af6"  # the run's printed EXPECTED_FITTED_SHA256
+# Trust note (ARTIFACT_SPEC SER9): model.tabpfn_fit is code-capable. from_artifact reloads it by unpickling its joblib
+# state, so it is
+# trusted only as far as the two digests above (the ZIP and the fitted archive) and the producer behind them. The weights
+# (model.safetensors) hold no code; tabpfn 8.1.0 has no non-pickle format for the fitted state.
 SAMPLE_ARTIFACT_PRODUCER = {
     "notebook": "tutorials/tabpfn_classifier_colab.ipynb (default path: the deterministic synthetic sample, seed 42)",
     "commit": "7fce7f931e9f65c7d406d436b912f754d3cfb1d1",
