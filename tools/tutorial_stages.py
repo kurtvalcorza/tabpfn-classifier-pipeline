@@ -68,6 +68,10 @@ SAMPLE_ARTIFACT_PRODUCER = {
     "release_tag": SAMPLE_ARTIFACT_TAG,
 }
 SAMPLE_ARTIFACT_MAX_BYTES = 512 * 1024 * 1024  # a download larger than this is refused before it is hashed or opened
+# The v1 sample was exported before the bundle carried model.safetensors (ARTIFACT_SPEC 2.0 SER9 (b)); it is the only
+# artifact accepted without one, and loads from its digest-checked model.ckpt. A sample exported by a recorded hosted
+# run of the current notebook gets a new tag and pin, and this flag becomes False (docs/release-verification.md).
+SAMPLE_ARTIFACT_PREDATES_SAFETENSORS = True
 EXTERNAL_DIR = "external_artifact"  # under outputs/: the section's predictions and provenance (XAS6)
 EXTERNAL_SAMPLE_ROWS = 8
 SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
@@ -462,10 +466,10 @@ def stage_export(run: Run) -> None:
     zip_sha = P.zip_artifact_bundle(art, zip_path)
     if manifest["foundationCheckpointSha256"] != P.WEIGHTS_SHA256:
         raise RuntimeError("the bundled checkpoint is not the pinned foundation checkpoint")
-    if manifest["convertedCheckpointSha256"] != P.WEIGHTS_SAFETENSORS_SHA256:
-        raise RuntimeError(f"the bundled {P.CONVERTED_CHECKPOINT_NAME} is not the deterministic conversion of the pinned checkpoint (SHA-256 {manifest['convertedCheckpointSha256']}, expected {P.WEIGHTS_SAFETENSORS_SHA256})")
+    if manifest["safetensorsWeightsSha256"] != P.WEIGHTS_SAFETENSORS_SHA256:
+        raise RuntimeError(f"the bundled {P.SAFETENSORS_NAME} is not the deterministic conversion of the pinned checkpoint (SHA-256 {manifest['safetensorsWeightsSha256']}, expected {P.WEIGHTS_SAFETENSORS_SHA256})")
     run.write_state("export_reference.json", {"proba": np.asarray(pipe.predict_proba(val[v["features"]])).tolist(), "accuracy": run.read_state("condition.json", "export")["validation"]["accuracy"], "device": pipe.device})
-    record = {"artifact": sorted(p.name for p in art.iterdir()), "fittedEstimatorSha256": manifest["fittedEstimatorSha256"], "foundationCheckpointSha256": manifest["foundationCheckpointSha256"], "convertedCheckpointSha256": manifest["convertedCheckpointSha256"], "conversion": manifest["convertedCheckpointProvenance"]["verification"], "bundle_zip": zip_path.name, "bundle_zip_sha256": zip_sha}
+    record = {"artifact": sorted(p.name for p in art.iterdir()), "fittedEstimatorSha256": manifest["fittedEstimatorSha256"], "foundationCheckpointSha256": manifest["foundationCheckpointSha256"], "safetensorsWeightsSha256": manifest["safetensorsWeightsSha256"], "conversion": {k: manifest["safetensorsConversion"][k] for k in ("tool", "toolVersion", "torchVersion", "tensorCount", "bitwiseEqual")}, "bundle_zip": zip_path.name, "bundle_zip_sha256": zip_sha}
     print(record)
     print(f"Trusted digests of this export: whoever loads {zip_path.name} elsewhere checks EXPECTED_ZIP_SHA256 = '{zip_sha}' and EXPECTED_FITTED_SHA256 = '{manifest['fittedEstimatorSha256']}'. Section 10 never loads this run's export; it loads the pinned sample artifact.")
     run.write_state("export.json", record)
@@ -482,15 +486,15 @@ def stage_reload(run: Run) -> None:
     fresh_dir = run.out / "artifact-reload"
     shutil.rmtree(fresh_dir, ignore_errors=True)
     shutil.copytree(run.out / "artifact", fresh_dir)
-    checked = P.validate_artifact_bundle(fresh_dir, expected_checkpoint_sha256=P.WEIGHTS_SHA256, expected_converted_sha256=P.WEIGHTS_SAFETENSORS_SHA256, verify_conversion=True)
-    fresh = P.TabPFNClassifierPipeline.from_artifact(fresh_dir, device=reference["device"], expected_checkpoint_sha256=P.WEIGHTS_SHA256, expected_converted_sha256=P.WEIGHTS_SAFETENSORS_SHA256)
+    checked = P.validate_artifact_bundle(fresh_dir, expected_checkpoint_sha256=P.WEIGHTS_SHA256, expected_safetensors_sha256=P.WEIGHTS_SAFETENSORS_SHA256, verify_conversion=True)
+    fresh = P.TabPFNClassifierPipeline.from_artifact(fresh_dir, device=reference["device"], expected_checkpoint_sha256=P.WEIGHTS_SHA256, expected_safetensors_sha256=P.WEIGHTS_SAFETENSORS_SHA256)
     if fresh.classes != v["classes"] or fresh.feature_columns != v["features"]:
         raise RuntimeError("reloaded artifact disagrees with the validated schema")
     proba = np.asarray(fresh.predict_proba(val[v["features"]]))
     expected = np.asarray(reference["proba"])
     diff = float(np.max(np.abs(proba - expected)))
     labels_identical = bool((proba.argmax(axis=1) == expected.argmax(axis=1)).all())
-    reload_check = {"rows": int(len(val)), "maxAbsProbabilityDifference": diff, "rtol": RELOAD_RTOL, "atol": RELOAD_ATOL, "labelsIdentical": labels_identical, "recordedAccuracy": reference["accuracy"], "recordedModelPath": checked["recordedModelPath"], "conversionCheck": {k: checked["conversionCheck"][k] for k in ("checked", "tensors", "bitwiseEqual")}, "reloadedFrom": P.CONVERTED_CHECKPOINT_NAME, "process": "fresh (separate from the exporting stage)"}
+    reload_check = {"rows": int(len(val)), "maxAbsProbabilityDifference": diff, "rtol": RELOAD_RTOL, "atol": RELOAD_ATOL, "labelsIdentical": labels_identical, "recordedAccuracy": reference["accuracy"], "recordedModelPath": checked["recordedModelPath"], "conversionCheck": {k: checked["conversionCheck"][k] for k in ("checked", "tensorCount", "bitwiseEqual")}, "reloadedFrom": P.SAFETENSORS_NAME, "process": "fresh (separate from the exporting stage)"}
     np.testing.assert_allclose(proba, expected, rtol=RELOAD_RTOL, atol=RELOAD_ATOL, err_msg="The reloaded artifact does not reproduce the exporting process's probabilities. Do not ship this artifact.")
     report_path = run.out / f"{STEM}_evaluation_report.json"
     if report_path.is_file():
@@ -546,7 +550,7 @@ def stage_predict(run: Run) -> None:
             raise refusal(exc, {"new rows": Path(path).name, Path(path).name: Path(path).name}, Path(path).name, fix) from None
         raise coded(P, exc, "new rows") from None
     # The rows are checked before the model is loaded, so a refused file costs no model load (DAT19).
-    fresh = P.TabPFNClassifierPipeline.from_artifact(run.out / "artifact", device=cond["device"], expected_checkpoint_sha256=P.WEIGHTS_SHA256, expected_converted_sha256=P.WEIGHTS_SAFETENSORS_SHA256)
+    fresh = P.TabPFNClassifierPipeline.from_artifact(run.out / "artifact", device=cond["device"], expected_checkpoint_sha256=P.WEIGHTS_SHA256, expected_safetensors_sha256=P.WEIGHTS_SAFETENSORS_SHA256)
     scored = fresh.predict(features)
     out = pd.concat([rows[passthrough].reset_index(drop=True), scored.drop(columns=["row_id"]).reset_index(drop=True)], axis=1) if passthrough else scored
     out.to_csv(run.out / f"{STEM}_predictions.csv", index=False)
@@ -650,11 +654,12 @@ def fetch_pinned_artifact(cache: Path, url: str, expected: str) -> Path:
     return cache
 
 
-def check_members(P, zip_path: Path) -> list[str]:
+def check_members(P, zip_path: Path, *, legacy: bool = False) -> list[str]:
     """The ZIP must hold exactly the four bundle members (``P.ARTIFACT_MEMBERS``), each once, at the top level; anything
     else (an extra file, a sub-directory copy that would overwrite a member when flattened) is refused before extraction.
-    A bundle exported before the ``model.safetensors`` conversion (ARTIFACT_SPEC SER9 b) lacks a member and is refused."""
-    expected = set(P.ARTIFACT_MEMBERS)
+    ``legacy`` accepts the three members of a bundle exported before ``model.safetensors`` existed (only the pinned v1
+    sample, ``SAMPLE_ARTIFACT_PREDATES_SAFETENSORS``)."""
+    expected = set(P.ARTIFACT_MEMBERS) - ({P.SAFETENSORS_NAME} if legacy else set())
     with zipfile.ZipFile(zip_path) as archive:
         names = [info.filename for info in archive.infolist() if not info.is_dir()]
     bare = [PurePosixPath(n.replace("\\", "/")).name for n in names]
@@ -669,7 +674,7 @@ def check_members(P, zip_path: Path) -> list[str]:
     return sorted(bare)
 
 
-def check_base_model(P, manifest: dict[str, Any]) -> dict[str, Any]:
+def check_base_model(P, manifest: dict[str, Any], *, legacy: bool = False) -> dict[str, Any]:
     """The manifest must name the pinned base model carried by this notebook, its ``model.ckpt`` must BE that
     checkpoint (``validate_artifact_bundle`` checks the bytes against ``WEIGHTS_SHA256``), so a swapped, code-capable
     checkpoint behind a re-hashed manifest is refused, and its ``model.safetensors`` (the file the estimator is rebuilt
@@ -680,9 +685,11 @@ def check_base_model(P, manifest: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError(f"Artifact was not produced on the pinned base model carried by this notebook: declares {declared}, expected {(P.MODEL_ID, P.MODEL_REVISION, P.WEIGHTS_SHA256)}.")
     if manifest.get("foundationCheckpointSha256") != P.WEIGHTS_SHA256:
         raise RuntimeError(f"The artifact's model.ckpt must be the pinned TabPFN-3 checkpoint (SHA-256 {P.WEIGHTS_SHA256}); its manifest records {manifest.get('foundationCheckpointSha256')}. Refusing to load a different checkpoint.")
-    if manifest.get("convertedCheckpointSha256") != P.WEIGHTS_SAFETENSORS_SHA256:
-        raise RuntimeError(f"The artifact's {P.CONVERTED_CHECKPOINT_NAME} must be the conversion of the pinned TabPFN-3 checkpoint (SHA-256 {P.WEIGHTS_SAFETENSORS_SHA256}); its manifest records {manifest.get('convertedCheckpointSha256')}. Refusing to load different weights.")
-    return {"mode": manifest.get("mode"), "checkpoint_binding": f"{P.CHECKPOINT_NAME} identical to the pinned base checkpoint and {P.CONVERTED_CHECKPOINT_NAME} identical to its pinned conversion (SHA-256 checked); the estimator is rebuilt from {P.CONVERTED_CHECKPOINT_NAME}"}
+    if legacy:
+        return {"mode": manifest.get("mode"), "checkpoint_binding": f"{P.CHECKPOINT_NAME} identical to the pinned base checkpoint (SHA-256 checked); this pinned v1 sample predates {P.SAFETENSORS_NAME}, so the estimator is rebuilt from that digest-checked {P.CHECKPOINT_NAME}"}
+    if manifest.get("safetensorsWeightsSha256") != P.WEIGHTS_SAFETENSORS_SHA256:
+        raise RuntimeError(f"The artifact's {P.SAFETENSORS_NAME} must be the conversion of the pinned TabPFN-3 checkpoint (SHA-256 {P.WEIGHTS_SAFETENSORS_SHA256}); its manifest records {manifest.get('safetensorsWeightsSha256')}. Refusing to load different weights.")
+    return {"mode": manifest.get("mode"), "checkpoint_binding": f"{P.CHECKPOINT_NAME} identical to the pinned base checkpoint and {P.SAFETENSORS_NAME} identical to its pinned conversion (SHA-256 checked); the estimator is rebuilt from {P.SAFETENSORS_NAME}"}
 
 
 def check_numeric_features(name: str, rows, kinds: dict[str, str]):
@@ -756,9 +763,10 @@ def stage_external_artifact(run: Run) -> None:
     bundle = run.state / "external_bundle"
     shutil.rmtree(bundle, ignore_errors=True)
     expected_fitted = ""
+    legacy = source == "pinned" and SAMPLE_ARTIFACT_PREDATES_SAFETENSORS  # never for an artifact of your own
     if source == "pinned":
         # SART3: provenance, format and integrity mechanism, stated before anything is downloaded or deserialised.
-        print({"artifact": "pinned sample artifact (created outside this run)", "url": SAMPLE_ARTIFACT_URL, "pinned_sha256": SAMPLE_ARTIFACT_SHA256, "bytes": SAMPLE_ARTIFACT_BYTES, "pinned_fitted_sha256": SAMPLE_ARTIFACT_FITTED_SHA256, "producer": SAMPLE_ARTIFACT_PRODUCER, "format": f"artifact_manifest.json schemaVersion {P.ARTIFACT_SCHEMA_VERSION} + {P.FITTED_NAME} + {P.CHECKPOINT_NAME} + {P.CONVERTED_CHECKPOINT_NAME}", "integrity": "SHA-256 of the whole ZIP, checked before extraction; then the member list, the fitted archive against its pinned digest, the checkpoint against the pinned base model, and the safetensors conversion against its pinned digest"})
+        print({"artifact": "pinned sample artifact (created outside this run)", "url": SAMPLE_ARTIFACT_URL, "pinned_sha256": SAMPLE_ARTIFACT_SHA256, "bytes": SAMPLE_ARTIFACT_BYTES, "pinned_fitted_sha256": SAMPLE_ARTIFACT_FITTED_SHA256, "producer": SAMPLE_ARTIFACT_PRODUCER, "format": f"artifact_manifest.json schemaVersion {P.ARTIFACT_SCHEMA_VERSION} + {P.FITTED_NAME} + {P.CHECKPOINT_NAME} + {P.SAFETENSORS_NAME}", "integrity": "SHA-256 of the whole ZIP, checked before extraction; then the member list, the fitted archive against its pinned digest, the checkpoint against the pinned base model, and the safetensors conversion against its pinned digest"})
         zip_path = fetch_pinned_artifact(run.root / "inputs" / "external_artifact.zip", SAMPLE_ARTIFACT_URL, SAMPLE_ARTIFACT_SHA256)
         expected_fitted = SAMPLE_ARTIFACT_FITTED_SHA256
         trust = {"trusted_digest": "verified (pinned SAMPLE_ARTIFACT_SHA256 and SAMPLE_ARTIFACT_FITTED_SHA256)", "zip_sha256": SAMPLE_ARTIFACT_SHA256, "url": SAMPLE_ARTIFACT_URL, "producer": SAMPLE_ARTIFACT_PRODUCER}
@@ -780,11 +788,11 @@ def stage_external_artifact(run: Run) -> None:
     else:
         raise ValueError(f"ARTIFACT_SOURCE must be the pinned sample or your own ZIP, got {source!r}")
     try:
-        members = check_members(P, zip_path)
+        members = check_members(P, zip_path, legacy=legacy)
         P.safe_extract_zip(zip_path, bundle)
-        artifact = P.validate_artifact_bundle(bundle, expected_fitted_sha256=expected_fitted, expected_checkpoint_sha256=P.WEIGHTS_SHA256, expected_converted_sha256=P.WEIGHTS_SAFETENSORS_SHA256)
+        artifact = P.validate_artifact_bundle(bundle, expected_fitted_sha256=expected_fitted, expected_checkpoint_sha256=P.WEIGHTS_SHA256, expected_safetensors_sha256="" if legacy else P.WEIGHTS_SAFETENSORS_SHA256, require_safetensors=not legacy)
         manifest = {k: v for k, v in artifact.items() if k not in ("verifiedSha256", "recordedModelPath", "conversionCheck")}
-        binding = check_base_model(P, manifest)
+        binding = check_base_model(P, manifest, legacy=legacy)
     except (ValueError, RuntimeError, FileNotFoundError, zipfile.BadZipFile) as exc:
         if source != "own":
             raise  # the pinned sample failing these checks is an integrity error, not a refusal: keep the traceback
@@ -794,10 +802,10 @@ def stage_external_artifact(run: Run) -> None:
     if source == "pinned":
         contract = synthetic_contract(run, P)
         check_data_contract(manifest, contract)
-    record = {"source": source, "zip": zip_path.name, **trust, **binding, "members": members, "bundle": str(bundle), "manifest": manifest, "verifiedSha256": artifact["verifiedSha256"], "data_contract": "synthetic default path (features, target, classes and feature kinds match)" if contract else "not checked (your own artifact; your rows must follow its manifest)"}
+    record = {"source": source, "zip": zip_path.name, **trust, **binding, "members": members, "weights_source": P.CHECKPOINT_NAME if legacy else P.SAFETENSORS_NAME, "bundle": str(bundle), "manifest": manifest, "verifiedSha256": artifact["verifiedSha256"], "data_contract": "synthetic default path (features, target, classes and feature kinds match)" if contract else "not checked (your own artifact; your rows must follow its manifest)"}
     run.write_state("external_artifact.json", record)
     print({k: record[k] for k in ("source", "zip", "zip_sha256", "trusted_digest", "mode", "checkpoint_binding", "data_contract")})
-    print({"schemaVersion": manifest.get("schemaVersion"), "taskType": manifest.get("taskType"), "baseModel": manifest.get("baseModel"), "nEstimators": manifest.get("nEstimators"), "randomState": manifest.get("randomState"), "fittedEstimatorSha256": artifact["verifiedSha256"]["fittedEstimator"], "foundationCheckpointSha256": artifact["verifiedSha256"]["foundationCheckpoint"], "convertedCheckpointSha256": artifact["verifiedSha256"]["convertedCheckpoint"]})
+    print({"schemaVersion": manifest.get("schemaVersion"), "taskType": manifest.get("taskType"), "baseModel": manifest.get("baseModel"), "nEstimators": manifest.get("nEstimators"), "randomState": manifest.get("randomState"), "fittedEstimatorSha256": artifact["verifiedSha256"]["fittedEstimator"], "foundationCheckpointSha256": artifact["verifiedSha256"]["foundationCheckpoint"], "safetensorsWeightsSha256": artifact["verifiedSha256"].get("safetensorsWeights", f"absent (pinned v1 sample predates {P.SAFETENSORS_NAME})")})
     print({"featureColumns": len(manifest["featureColumns"]), "targetColumn": manifest["targetColumn"], "classes": manifest["classes"], "featureKinds": sorted(set((manifest.get("featureKinds") or {}).values()))})
 
 
@@ -809,7 +817,7 @@ def external_serving(run: Run):
     P = package(run.root)
     art = run.read_state("external_artifact.json", "external_reconstruct")
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    serving = P.TabPFNClassifierPipeline.from_artifact(Path(art["bundle"]), device=device, expected_fitted_sha256=art["verifiedSha256"]["fittedEstimator"], expected_checkpoint_sha256=P.WEIGHTS_SHA256, expected_converted_sha256=P.WEIGHTS_SAFETENSORS_SHA256)
+    serving = P.TabPFNClassifierPipeline.from_artifact(Path(art["bundle"]), device=device, expected_fitted_sha256=art["verifiedSha256"]["fittedEstimator"], expected_checkpoint_sha256=P.WEIGHTS_SHA256, **({"require_safetensors": False} if art.get("weights_source") == P.CHECKPOINT_NAME else {"expected_safetensors_sha256": P.WEIGHTS_SAFETENSORS_SHA256}))
     manifest = art["manifest"]
     if serving.classes != [str(c) for c in manifest["classes"]] or serving.feature_columns != list(manifest["featureColumns"]):
         raise RuntimeError("Reconstructed estimator disagrees with the validated manifest.")

@@ -35,13 +35,13 @@ def _stand_in_bundle(root: Path) -> Path:
     blob = hashlib.sha256(b"stand-in checkpoint").digest() * 128
     (root / api.CHECKPOINT_NAME).write_bytes(blob)
     ckpt_sha = api.sha256_file(root / api.CHECKPOINT_NAME)
-    converted = api.write_safetensors(root / api.CONVERTED_CHECKPOINT_NAME, {"blob": ("U8", [len(blob)], blob)}, {"config": "{}"})
+    converted = api.write_safetensors(root / api.SAFETENSORS_NAME, {"blob": ("U8", [len(blob)], blob)}, {"config": "{}"})
     manifest = {
         "schemaVersion": api.ARTIFACT_SCHEMA_VERSION, "taskType": api.TASK_TYPE, "targetColumn": "target", "featureColumns": ["a"], "classes": ["x", "y"],
         "fittedEstimator": api.FITTED_NAME, "fittedEstimatorSha256": api.sha256_file(root / api.FITTED_NAME),
         "foundationCheckpoint": api.CHECKPOINT_NAME, "foundationCheckpointSha256": ckpt_sha,
-        "convertedCheckpoint": api.CONVERTED_CHECKPOINT_NAME, "convertedCheckpointSha256": converted,
-        "convertedCheckpointProvenance": {"derivedFrom": {"file": api.CHECKPOINT_NAME, "sha256": ckpt_sha}, "tool": api.SAFETENSORS_CONVERTER, "toolVersion": api.SAFETENSORS_CONVERTER_VERSION},
+        "safetensorsWeights": api.SAFETENSORS_NAME, "safetensorsWeightsSha256": converted,
+        "safetensorsConversion": {"derived_from": {"file": api.CHECKPOINT_NAME, "sha256": ckpt_sha}, "tool": "safetensors", "toolVersion": "0.8.0", "converter": api.SAFETENSORS_CONVERTER},
     }
     _write_manifest(root, manifest)
     return root
@@ -131,31 +131,46 @@ def test_plain_metadata_rules() -> None:
 
 def test_validator_accepts_the_stand_in_bundle(tmp_path: Path) -> None:
     root = _stand_in_bundle(tmp_path / "art")
-    checked = api.validate_artifact_bundle(root, expected_converted_sha256=_manifest(root)["convertedCheckpointSha256"])
-    assert set(checked["verifiedSha256"]) == {"fittedEstimator", "foundationCheckpoint", "convertedCheckpoint"}
-    assert checked["conversionCheck"] == {"checked": "structure and digest", "tensors": 1}
+    checked = api.validate_artifact_bundle(root, expected_safetensors_sha256=_manifest(root)["safetensorsWeightsSha256"])
+    assert set(checked["verifiedSha256"]) == {"fittedEstimator", "foundationCheckpoint", "safetensorsWeights"}
+    assert api.validate_artifact_bundle(root, require_safetensors=False)["conversionCheck"]["checked"] == "structure and digest"  # present: still checked
+    assert checked["conversionCheck"] == {"checked": "structure and digest", "tensorCount": 1}
 
 
 def test_validator_refuses_missing_safetensors(tmp_path: Path) -> None:
     root = _stand_in_bundle(tmp_path / "art")
-    (root / api.CONVERTED_CHECKPOINT_NAME).unlink()
+    (root / api.SAFETENSORS_NAME).unlink()
     with pytest.raises(ValueError, match="model.safetensors is missing"):
         api.validate_artifact_bundle(root)
 
 
 def test_validator_refuses_a_pre_conversion_manifest(tmp_path: Path) -> None:
-    """A bundle exported before SER9 (b) (no convertedCheckpoint entry, e.g. sample-artifact-synthetic-v1) is refused."""
+    """A bundle exported before SER9 (b) (no safetensorsWeights entry, e.g. sample-artifact-synthetic-v1) is refused by default
+    and accepted only with require_safetensors=False, which then loads from the digest-checked model.ckpt."""
     root = _stand_in_bundle(tmp_path / "art")
-    manifest = {k: v for k, v in _manifest(root).items() if not k.startswith("convertedCheckpoint")}
+    manifest = {k: v for k, v in _manifest(root).items() if not k.startswith("safetensorsWeights")}
     _write_manifest(root, manifest)
-    (root / api.CONVERTED_CHECKPOINT_NAME).unlink()
-    with pytest.raises(ValueError, match="predates the safetensors conversion"):
+    (root / api.SAFETENSORS_NAME).unlink()
+    with pytest.raises(ValueError, match="manifest names no safetensorsWeights"):
         api.validate_artifact_bundle(root)
+    checked = api.validate_artifact_bundle(root, require_safetensors=False)
+    assert set(checked["verifiedSha256"]) == {"fittedEstimator", "foundationCheckpoint"} and checked["conversionCheck"]["checked"].startswith("absent")
+    with pytest.raises(ValueError, match="manifest names no safetensorsWeights"):  # from_artifact defaults to requiring it too
+        api.TabPFNClassifierPipeline.from_artifact(root, device="cpu", loader=lambda fitted, device: None)
+    seen = {}
+
+    def loader(fitted: Path, device: str):
+        with zipfile.ZipFile(fitted) as archive:
+            seen["model_path"] = json.loads(archive.read("init_params.json"))["model_path"]
+        return type("Estimator", (), {"classes_": ["x", "y"]})()
+
+    reloaded = api.TabPFNClassifierPipeline.from_artifact(root, device="cpu", loader=loader, require_safetensors=False)
+    assert Path(seen["model_path"]).name == api.CHECKPOINT_NAME and reloaded.classes == ["x", "y"]
 
 
 def test_validator_refuses_tampered_safetensors(tmp_path: Path) -> None:
     root = _stand_in_bundle(tmp_path / "art")
-    path = root / api.CONVERTED_CHECKPOINT_NAME
+    path = root / api.SAFETENSORS_NAME
     raw = bytearray(path.read_bytes())
     raw[-1] ^= 0xFF
     path.write_bytes(bytes(raw))
@@ -166,24 +181,24 @@ def test_validator_refuses_tampered_safetensors(tmp_path: Path) -> None:
 def test_validator_refuses_a_rehashed_conversion_of_other_weights(tmp_path: Path) -> None:
     """Other weights behind a re-hashed manifest pass the manifest digest but not a pinned expected digest."""
     root = _stand_in_bundle(tmp_path / "art")
-    pinned = _manifest(root)["convertedCheckpointSha256"]
-    other = api.write_safetensors(root / api.CONVERTED_CHECKPOINT_NAME, {"blob": ("U8", [4096], b"\1" * 4096)}, {"config": "{}"})
+    pinned = _manifest(root)["safetensorsWeightsSha256"]
+    other = api.write_safetensors(root / api.SAFETENSORS_NAME, {"blob": ("U8", [4096], b"\1" * 4096)}, {"config": "{}"})
     manifest = _manifest(root)
-    manifest["convertedCheckpointSha256"] = other
+    manifest["safetensorsWeightsSha256"] = other
     _write_manifest(root, manifest)
     api.validate_artifact_bundle(root)  # internally consistent ...
     with pytest.raises(ValueError, match="!= expected"):
-        api.validate_artifact_bundle(root, expected_converted_sha256=pinned)  # ... but not the pinned conversion
+        api.validate_artifact_bundle(root, expected_safetensors_sha256=pinned)  # ... but not the pinned conversion
 
 
 @pytest.mark.parametrize(
     "key, value, message",
-    [("derivedFrom", {"file": "model.ckpt", "sha256": "0" * 64}, "derivedFrom"), ("derivedFrom", {"file": "other.ckpt"}, "derivedFrom"), ("derivedFrom", None, "derivedFrom"), ("tool", "something-else", "names tool")],
+    [("derived_from", {"file": "model.ckpt", "sha256": "0" * 64}, "derived_from"), ("derived_from", {"file": "other.ckpt"}, "derived_from"), ("derived_from", None, "derived_from"), ("converter", "something-else", "names converter")],
 )
 def test_validator_refuses_provenance_that_does_not_name_the_checkpoint(tmp_path: Path, key: str, value, message: str) -> None:
     root = _stand_in_bundle(tmp_path / "art")
     manifest = _manifest(root)
-    manifest["convertedCheckpointProvenance"] = {**manifest["convertedCheckpointProvenance"], key: value}
+    manifest["safetensorsConversion"] = {**manifest["safetensorsConversion"], key: value}
     _write_manifest(root, manifest)
     with pytest.raises(ValueError, match=message):
         api.validate_artifact_bundle(root)
@@ -191,9 +206,9 @@ def test_validator_refuses_provenance_that_does_not_name_the_checkpoint(tmp_path
 
 def test_validator_refuses_a_safetensors_that_is_not_safetensors(tmp_path: Path) -> None:
     root = _stand_in_bundle(tmp_path / "art")
-    (root / api.CONVERTED_CHECKPOINT_NAME).write_bytes(b"\x80\x02" + b"\0" * 2046)  # a pickle-looking file
+    (root / api.SAFETENSORS_NAME).write_bytes(b"\x80\x02" + b"\0" * 2046)  # a pickle-looking file
     manifest = _manifest(root)
-    manifest["convertedCheckpointSha256"] = api.sha256_file(root / api.CONVERTED_CHECKPOINT_NAME)
+    manifest["safetensorsWeightsSha256"] = api.sha256_file(root / api.SAFETENSORS_NAME)
     _write_manifest(root, manifest)
     with pytest.raises(ValueError, match="header is not JSON"):
         api.validate_artifact_bundle(root)
@@ -231,7 +246,7 @@ def test_conversion_is_faithful(tmp_path: Path) -> None:
 
     obj = _synthetic_checkpoint(tmp_path / "model.ckpt")
     info = api.convert_checkpoint_to_safetensors(tmp_path / "model.ckpt", tmp_path / "model.safetensors")
-    assert info["bitwiseEqual"] is True and info["tensors"] == len(obj["state_dict"]) and info["sha256"] == api.sha256_file(tmp_path / "model.safetensors")
+    assert info["bitwiseEqual"] is True and info["tensorCount"] == len(obj["state_dict"]) and info["sha256"] == api.sha256_file(tmp_path / "model.safetensors")
     assert info["metadataKeys"] == sorted(k for k in obj if k != "state_dict")
     with safe_open(str(tmp_path / "model.safetensors"), framework="pt", device="cpu") as handle:
         assert set(handle.keys()) == set(obj["state_dict"])
@@ -262,11 +277,11 @@ def test_conversion_disagreeing_with_the_checkpoint_is_refused(tmp_path: Path) -
     # In a bundle: the other weights behind a re-hashed manifest pass the digest checks, and verify_conversion refuses them.
     root = _stand_in_bundle(tmp_path / "art")
     (root / api.CHECKPOINT_NAME).write_bytes((tmp_path / "model.ckpt").read_bytes())
-    (root / api.CONVERTED_CHECKPOINT_NAME).write_bytes((tmp_path / "other.safetensors").read_bytes())
+    (root / api.SAFETENSORS_NAME).write_bytes((tmp_path / "other.safetensors").read_bytes())
     manifest = _manifest(root)
     manifest["foundationCheckpointSha256"] = api.sha256_file(root / api.CHECKPOINT_NAME)
-    manifest["convertedCheckpointSha256"] = api.sha256_file(root / api.CONVERTED_CHECKPOINT_NAME)
-    manifest["convertedCheckpointProvenance"]["derivedFrom"]["sha256"] = manifest["foundationCheckpointSha256"]
+    manifest["safetensorsWeightsSha256"] = api.sha256_file(root / api.SAFETENSORS_NAME)
+    manifest["safetensorsConversion"]["derived_from"]["sha256"] = manifest["foundationCheckpointSha256"]
     _write_manifest(root, manifest)
     api.validate_artifact_bundle(root)
     with pytest.raises(ValueError, match="differs"):
@@ -301,9 +316,9 @@ def test_tabpfn_checkpoint_loader_reads_the_conversion(tmp_path: Path) -> None:
 @pytest.mark.skipif(not PINNED_CHECKPOINT.is_file(), reason="pinned TabPFN-3 checkpoint not staged under weights/ (non-commercial weights; not fetched in CI)")
 def test_pinned_checkpoint_converts_to_the_pinned_digest(tmp_path: Path) -> None:
     assert api.sha256_file(PINNED_CHECKPOINT) == api.WEIGHTS_SHA256
-    info = api.convert_checkpoint_to_safetensors(PINNED_CHECKPOINT, tmp_path / api.CONVERTED_CHECKPOINT_NAME)
-    assert info["sha256"] == api.WEIGHTS_SAFETENSORS_SHA256 and (tmp_path / api.CONVERTED_CHECKPOINT_NAME).stat().st_size == api.WEIGHTS_SAFETENSORS_BYTES
-    assert info["bitwiseEqual"] is True and info["tensors"] == 510
+    info = api.convert_checkpoint_to_safetensors(PINNED_CHECKPOINT, tmp_path / api.SAFETENSORS_NAME)
+    assert info["sha256"] == api.WEIGHTS_SAFETENSORS_SHA256 and (tmp_path / api.SAFETENSORS_NAME).stat().st_size == api.WEIGHTS_SAFETENSORS_BYTES
+    assert info["bitwiseEqual"] is True and info["tensorCount"] == 510
 
 
 @pytest.mark.integration
@@ -325,10 +340,10 @@ def test_real_tabpfn_reloads_from_the_conversion_with_identical_predictions(tmp_
     api._coerce_non_json_init_params(model)
     save_tabpfn_model(model, tmp_path / api.CHECKPOINT_NAME)
     save_fitted_tabpfn_model(model, tmp_path / api.FITTED_NAME)
-    info = api.convert_checkpoint_to_safetensors(tmp_path / api.CHECKPOINT_NAME, tmp_path / api.CONVERTED_CHECKPOINT_NAME)
+    info = api.convert_checkpoint_to_safetensors(tmp_path / api.CHECKPOINT_NAME, tmp_path / api.SAFETENSORS_NAME)
     assert info["bitwiseEqual"] is True
     results = {}
-    for name in (api.CHECKPOINT_NAME, api.CONVERTED_CHECKPOINT_NAME):
+    for name in (api.CHECKPOINT_NAME, api.SAFETENSORS_NAME):
         rewritten = api.rewrite_model_path(tmp_path / api.FITTED_NAME, tmp_path / name, tmp_path / f"via-{name}.tabpfn_fit")
         results[name] = np.asarray(load_fitted_tabpfn_model(rewritten, device="cpu").predict_proba(test), dtype=float)
-    assert np.array_equal(results[api.CHECKPOINT_NAME], results[api.CONVERTED_CHECKPOINT_NAME])
+    assert np.array_equal(results[api.CHECKPOINT_NAME], results[api.SAFETENSORS_NAME])

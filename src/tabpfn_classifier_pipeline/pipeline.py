@@ -58,14 +58,16 @@ METRIC_IDS = ("accuracy", "balancedAccuracy", "logLoss", "rocAuc")
 ARTIFACT_SCHEMA_VERSION = 1
 FITTED_NAME = "model.tabpfn_fit"
 CHECKPOINT_NAME = "model.ckpt"
-CONVERTED_CHECKPOINT_NAME = "model.safetensors"
+SAFETENSORS_NAME = "model.safetensors"
 ARTIFACT_MANIFEST_NAME = "artifact_manifest.json"
-ARTIFACT_MEMBERS = (ARTIFACT_MANIFEST_NAME, FITTED_NAME, CHECKPOINT_NAME, CONVERTED_CHECKPOINT_NAME)
+ARTIFACT_MEMBERS = (ARTIFACT_MANIFEST_NAME, FITTED_NAME, CHECKPOINT_NAME, SAFETENSORS_NAME)
 # ARTIFACT_SPEC SER9 (b): model.ckpt is the byte copy of the pinned upstream (pickle-backed) checkpoint, kept so its
 # identity can be verified against WEIGHTS_SHA256; model.safetensors is its faithful non-code-executing conversion
 # (SER7/SER8), and is the file the reload path hands to TabPFN. The conversion is deterministic, so converting the
 # pinned checkpoint always gives these bytes (tests/test_safetensors_conversion.py checks it when the checkpoint is staged).
 SAFETENSORS_CONVERTER = "tabpfn_classifier_pipeline.convert_checkpoint_to_safetensors"
+# Same layout string as tabpfn-regressor-pipeline: TabPFN 8.1.0 loads it directly (model_path ending in .safetensors).
+SAFETENSORS_LAYOUT = "tabpfn.checkpoint safetensors (state_dict tensors; one JSON metadata entry per other top-level key)"
 SAFETENSORS_CONVERTER_VERSION = 1  # bump when the emitted bytes change; WEIGHTS_SAFETENSORS_* below must then be re-derived
 WEIGHTS_SAFETENSORS_SHA256 = "c6908ae69702329534c54c4782e082bfe78fd763855cf9af5236bae4223b7b2a"
 WEIGHTS_SAFETENSORS_BYTES = 212699460
@@ -573,8 +575,10 @@ def convert_checkpoint_to_safetensors(checkpoint: str | Path, destination: str |
         tensors[name] = _tensor_bytes(value)
     metadata = {key: metadata_json(value, key) for key, value in obj.items() if key != "state_dict"}
     digest = write_safetensors(destination, tensors, metadata)
-    check = verify_safetensors_conversion(checkpoint, destination, _loaded=obj)
-    return {"sha256": digest, **check}
+    proof = verify_safetensors_conversion(checkpoint, destination, _loaded=obj)
+    # Provenance keys match tabpfn-regressor-pipeline's safetensorsConversion record; ``tool``/``toolVersion`` name the
+    # safetensors library that read the file back for the SER8 proof (the bytes are written by this module's converter).
+    return {"sha256": digest, "tool": "safetensors", "converter": SAFETENSORS_CONVERTER, "converterVersion": SAFETENSORS_CONVERTER_VERSION, "layout": SAFETENSORS_LAYOUT, "checkpointLoad": "torch.load(weights_only=True)", **proof}
 
 
 def verify_safetensors_conversion(checkpoint: str | Path, converted: str | Path, *, _loaded: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -587,6 +591,7 @@ def verify_safetensors_conversion(checkpoint: str | Path, converted: str | Path,
     obj = _loaded if _loaded is not None else _load_checkpoint_restricted(checkpoint)
     state = obj["state_dict"]
     read_safetensors_header(converted)
+    total = 0
     with safe_open(str(converted), framework="pt", device="cpu") as handle:
         metadata = handle.metadata() or {}
         names = set(handle.keys())
@@ -598,19 +603,22 @@ def verify_safetensors_conversion(checkpoint: str | Path, converted: str | Path,
                 raise ValueError(f"{Path(converted).name}: tensor {name!r} is {got.dtype}{tuple(got.shape)}, checkpoint has {ref.dtype}{tuple(ref.shape)}")
             if not torch.equal(got.contiguous().reshape(-1).view(torch.uint8), ref.contiguous().reshape(-1).view(torch.uint8)):
                 raise ValueError(f"{Path(converted).name}: tensor {name!r} differs from the checkpoint")
+            total += ref.numel() * ref.element_size()
     expected = {key: metadata_json(value, key) for key, value in obj.items() if key != "state_dict"}
     if metadata != expected:
         differing = sorted(k for k in set(metadata) | set(expected) if metadata.get(k) != expected.get(k))
         raise ValueError(f"{Path(converted).name}: header metadata differs from the checkpoint's non-tensor fields: {differing}")
-    return {"tensors": len(names), "metadataKeys": sorted(expected), "bitwiseEqual": True, "torchVersion": torch.__version__, "safetensorsVersion": safetensors.__version__}
+    return {"tensorCount": len(names), "tensorBytes": total, "metadataKeys": sorted(expected), "bitwiseEqual": True, "toolVersion": safetensors.__version__, "torchVersion": torch.__version__.split("+")[0]}
 
 
-def validate_artifact_bundle(artifact_dir: str | Path, *, expected_fitted_sha256: str = "", expected_checkpoint_sha256: str = "", expected_converted_sha256: str = "", verify_conversion: bool = False) -> dict[str, Any]:
+def validate_artifact_bundle(artifact_dir: str | Path, *, expected_fitted_sha256: str = "", expected_checkpoint_sha256: str = "", expected_safetensors_sha256: str = "", require_safetensors: bool = True, verify_conversion: bool = False) -> dict[str, Any]:
     """Check manifest schema, member names, sizes, digests and archive safety BEFORE any model state is deserialised.
 
-    ``model.safetensors`` is required: its digest must match the manifest (and ``expected_converted_sha256`` when
-    given), its provenance must name ``model.ckpt``'s verified digest, and its structure is parsed without torch.
-    ``verify_conversion=True`` additionally compares it tensor by tensor with ``model.ckpt`` (needs torch; SER8)."""
+    ``model.safetensors`` is required (SER9 b): its digest must match the manifest (and ``expected_safetensors_sha256``
+    when given), its ``safetensorsConversion.derived_from`` must name ``model.ckpt``'s verified digest, and its structure
+    is parsed without torch. ``verify_conversion=True`` additionally compares it tensor by tensor with ``model.ckpt``
+    (needs torch; SER8). ``require_safetensors=False`` accepts a bundle exported before the conversion existed; only
+    the notebook's pinned v1 sample artifact is loaded that way (``tools/tutorial_stages.py``)."""
     root = Path(artifact_dir)
     manifest_path = root / ARTIFACT_MANIFEST_NAME
     if not manifest_path.is_file():
@@ -622,9 +630,13 @@ def validate_artifact_bundle(artifact_dir: str | Path, *, expected_fitted_sha256
         if key not in manifest:
             raise ValueError(f"manifest lacks {key}")
     digests: dict[str, str] = {}
-    if manifest.get("convertedCheckpoint") != CONVERTED_CHECKPOINT_NAME:
-        raise ValueError(f"manifest must name {CONVERTED_CHECKPOINT_NAME} as convertedCheckpoint (ARTIFACT_SPEC SER9 b), got {manifest.get('convertedCheckpoint')!r}; this bundle predates the safetensors conversion or was altered")
-    for key, override in (("fittedEstimator", expected_fitted_sha256), ("foundationCheckpoint", expected_checkpoint_sha256), ("convertedCheckpoint", expected_converted_sha256)):
+    has_safetensors = "safetensorsWeights" in manifest
+    if not has_safetensors and require_safetensors:
+        raise ValueError(f"manifest names no safetensorsWeights: an artifact must carry {SAFETENSORS_NAME}, the safetensors conversion of {manifest.get('foundationCheckpoint')} (ARTIFACT_SPEC SER9 (b)); this bundle predates the safetensors conversion or was altered")
+    if has_safetensors and manifest["safetensorsWeights"] != SAFETENSORS_NAME:
+        raise ValueError(f"manifest safetensorsWeights must be {SAFETENSORS_NAME!r}, got {manifest['safetensorsWeights']!r}")
+    members = [("fittedEstimator", expected_fitted_sha256), ("foundationCheckpoint", expected_checkpoint_sha256)] + ([("safetensorsWeights", expected_safetensors_sha256)] if has_safetensors else [])
+    for key, override in members:
         name = manifest.get(key)
         if not isinstance(name, str) or Path(name).name != name:
             raise ValueError(f"manifest {key} must be a bare file name, got {name!r}")
@@ -637,16 +649,19 @@ def validate_artifact_bundle(artifact_dir: str | Path, *, expected_fitted_sha256
         if override and digest != override.strip().lower():
             raise ValueError(f"{name} SHA-256 {digest} != expected {override.strip().lower()}")
         digests[key] = digest
-    provenance = manifest.get("convertedCheckpointProvenance") or {}
-    derived = provenance.get("derivedFrom") or {}
-    if (derived.get("file"), derived.get("sha256")) != (manifest["foundationCheckpoint"], digests["foundationCheckpoint"]):
-        raise ValueError(f"{CONVERTED_CHECKPOINT_NAME} provenance derivedFrom {derived!r} does not name the verified {manifest['foundationCheckpoint']} (SHA-256 {digests['foundationCheckpoint']})")
-    if provenance.get("tool") != SAFETENSORS_CONVERTER:
-        raise ValueError(f"{CONVERTED_CHECKPOINT_NAME} provenance names tool {provenance.get('tool')!r}, expected {SAFETENSORS_CONVERTER}")
-    converted = read_safetensors_header(root / manifest["convertedCheckpoint"])
-    conversion = {"checked": "structure and digest", "tensors": len(converted["tensors"])}
-    if verify_conversion:
-        conversion = {"checked": "tensor-by-tensor against the checkpoint (SER8)", **verify_safetensors_conversion(root / manifest["foundationCheckpoint"], root / manifest["convertedCheckpoint"])}
+    if has_safetensors:
+        provenance = manifest.get("safetensorsConversion") or {}
+        derived = provenance.get("derived_from") or {}
+        if (derived.get("file"), derived.get("sha256")) != (manifest["foundationCheckpoint"], digests["foundationCheckpoint"]):
+            raise ValueError(f"{SAFETENSORS_NAME} is not recorded as derived from this bundle's {manifest['foundationCheckpoint']} (derived_from={derived!r}, checkpoint SHA-256 {digests['foundationCheckpoint']})")
+        if provenance.get("converter") != SAFETENSORS_CONVERTER:
+            raise ValueError(f"{SAFETENSORS_NAME} provenance names converter {provenance.get('converter')!r}, expected {SAFETENSORS_CONVERTER}")
+        converted = read_safetensors_header(root / SAFETENSORS_NAME)
+        conversion = {"checked": "structure and digest", "tensorCount": len(converted["tensors"])}
+        if verify_conversion:
+            conversion = {"checked": "tensor-by-tensor against the checkpoint (SER8)", **verify_safetensors_conversion(root / manifest["foundationCheckpoint"], root / SAFETENSORS_NAME)}
+    else:
+        conversion = {"checked": f"absent: pre-conversion bundle accepted with require_safetensors=False; weights load from {manifest['foundationCheckpoint']}"}
     init_params = _safe_fitted_archive(root / manifest["fittedEstimator"])
     return {**manifest, "verifiedSha256": digests, "recordedModelPath": init_params.get("model_path"), "conversionCheck": conversion}
 
@@ -791,10 +806,10 @@ class TabPFNClassifierPipeline:
         saver(model, root / FITTED_NAME)
         shutil.copyfile(self.weights_path, root / CHECKPOINT_NAME)
         checkpoint_sha256 = sha256_file(root / CHECKPOINT_NAME)
-        conversion = (converter or convert_checkpoint_to_safetensors)(root / CHECKPOINT_NAME, root / CONVERTED_CHECKPOINT_NAME)
-        converted_sha256 = sha256_file(root / CONVERTED_CHECKPOINT_NAME)
-        if conversion.get("bitwiseEqual") is not True or conversion.get("sha256") != converted_sha256:
-            raise RuntimeError(f"the {CONVERTED_CHECKPOINT_NAME} conversion was not verified against {CHECKPOINT_NAME}: {conversion!r}")
+        conversion = (converter or convert_checkpoint_to_safetensors)(root / CHECKPOINT_NAME, root / SAFETENSORS_NAME)
+        safetensors_sha256 = sha256_file(root / SAFETENSORS_NAME)
+        if conversion.get("bitwiseEqual") is not True or conversion.get("sha256") != safetensors_sha256:
+            raise RuntimeError(f"the {SAFETENSORS_NAME} conversion was not verified against {CHECKPOINT_NAME}: {conversion!r}")
         manifest = {
             "schemaVersion": ARTIFACT_SCHEMA_VERSION,
             "taskType": TASK_TYPE,
@@ -805,16 +820,9 @@ class TabPFNClassifierPipeline:
             "foundationCheckpoint": CHECKPOINT_NAME,
             "fittedEstimatorSha256": sha256_file(root / FITTED_NAME),
             "foundationCheckpointSha256": checkpoint_sha256,
-            "convertedCheckpoint": CONVERTED_CHECKPOINT_NAME,
-            "convertedCheckpointSha256": converted_sha256,
-            "convertedCheckpointProvenance": {
-                "derivedFrom": {"file": CHECKPOINT_NAME, "sha256": checkpoint_sha256},
-                "tool": SAFETENSORS_CONVERTER,
-                "toolVersion": SAFETENSORS_CONVERTER_VERSION,
-                "method": "torch.load(weights_only=True); state_dict tensors written byte for byte under their own names; every other checkpoint field as one canonical-JSON __metadata__ entry (TabPFN Checkpoint layout); deterministic header",
-                "verification": {k: conversion[k] for k in ("tensors", "metadataKeys", "bitwiseEqual", "torchVersion", "safetensorsVersion") if k in conversion},
-                "serClause": "SER9 (b): model.ckpt is the byte copy of the pinned upstream checkpoint, kept so its identity can be verified; model.safetensors is its faithful non-code-executing conversion and is what the reload path loads",
-            },
+            "safetensorsWeights": SAFETENSORS_NAME,
+            "safetensorsWeightsSha256": safetensors_sha256,
+            "safetensorsConversion": {"ser9Clause": "b", **{k: v for k, v in conversion.items() if k != "sha256"}, "derived_from": {"file": CHECKPOINT_NAME, "sha256": checkpoint_sha256}},
             "portableLoader": "tabpfn_classifier_pipeline.TabPFNClassifierPipeline.from_artifact",
             "baseModel": {"modelId": MODEL_ID, "revision": MODEL_REVISION, "file": WEIGHTS_FILE, "sha256": WEIGHTS_SHA256, "modelVersion": MODEL_VERSION, "license": MODEL_LICENSE},
             "mode": "zero-shot-icl",
@@ -825,12 +833,14 @@ class TabPFNClassifierPipeline:
         return manifest
 
     @classmethod
-    def from_artifact(cls, artifact_dir: str | Path, device: str | None = None, *, expected_fitted_sha256: str = "", expected_checkpoint_sha256: str = "", expected_converted_sha256: str = "", verify_conversion: bool = False, loader: Callable[[Path, str], Any] | None = None) -> TabPFNClassifierPipeline:
+    def from_artifact(cls, artifact_dir: str | Path, device: str | None = None, *, expected_fitted_sha256: str = "", expected_checkpoint_sha256: str = "", expected_safetensors_sha256: str = "", require_safetensors: bool = True, verify_conversion: bool = False, loader: Callable[[Path, str], Any] | None = None) -> TabPFNClassifierPipeline:
         """Validate the bundle, then reconstruct the estimator from the fitted archive + the validated ``model.safetensors``
         (no refit, no download). TabPFN reads a ``.safetensors`` model_path with safetensors' ``safe_open``, so the
-        pickle-backed ``model.ckpt`` is never deserialised here; it stays in the bundle as the digest-bound byte copy."""
+        pickle-backed ``model.ckpt`` is never deserialised here; it stays in the bundle as the digest-bound byte copy.
+        Only a pre-conversion bundle accepted with ``require_safetensors=False`` (the notebook's pinned v1 sample) loads
+        from its digest-checked ``model.ckpt``."""
         root = Path(artifact_dir)
-        manifest = validate_artifact_bundle(root, expected_fitted_sha256=expected_fitted_sha256, expected_checkpoint_sha256=expected_checkpoint_sha256, expected_converted_sha256=expected_converted_sha256, verify_conversion=verify_conversion)
+        manifest = validate_artifact_bundle(root, expected_fitted_sha256=expected_fitted_sha256, expected_checkpoint_sha256=expected_checkpoint_sha256, expected_safetensors_sha256=expected_safetensors_sha256, require_safetensors=require_safetensors, verify_conversion=verify_conversion)
         if device is None:
             import torch
 
@@ -841,7 +851,7 @@ class TabPFNClassifierPipeline:
             def loader(fitted: Path, dev: str) -> Any:
                 return load_fitted_tabpfn_model(fitted, device=dev)
 
-        converted = root / manifest["convertedCheckpoint"]
+        converted = root / (manifest.get("safetensorsWeights") or manifest["foundationCheckpoint"])
         with tempfile.TemporaryDirectory() as temp_dir:
             rewritten = rewrite_model_path(root / manifest["fittedEstimator"], converted, Path(temp_dir) / FITTED_NAME)
             model = loader(rewritten, device)
