@@ -8,9 +8,32 @@ the checkpoint beside the persisted artifact.
 from __future__ import annotations
 
 import json
+import os
+import re
 import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
+
+
+# tabpfn 8.1.0 reads checkpoints with torch.load and weights_only=None; that is restricted only on torch>=2.6
+# and only while TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD is unset. Same check as the package's require_weights_only_load.
+def require_weights_only_load(torch_version: str | None = None) -> None:
+    """Refuse to continue unless a TabPFN checkpoint would load with weights_only=True."""
+    if os.environ.get("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "").strip().lower() in {"1", "y", "yes", "true"}:
+        raise RuntimeError(
+            "Refusing to load a TabPFN checkpoint: TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD is set, "
+            "which would make torch.load unpickle it without weights_only; unset it."
+        )
+    if torch_version is None:
+        import torch
+
+        torch_version = torch.__version__
+    match = re.match(r"(\d+)\.(\d+)", torch_version)
+    if match is None or (int(match[1]), int(match[2])) < (2, 6):
+        raise RuntimeError(
+            f"Refusing to load a TabPFN checkpoint: torch {torch_version} is older than 2.6, "
+            "so torch.load would not default to weights_only=True; install torch>=2.6."
+        )
 
 
 def _safe_member(name: str) -> None:
@@ -72,6 +95,7 @@ def load_dimer_tabpfn_artifact(
 
     from tabpfn.model_loading import load_fitted_tabpfn_model
 
+    require_weights_only_load()
     with tempfile.TemporaryDirectory() as temp_dir:
         rewritten = Path(temp_dir) / "model.tabpfn_fit"
         rewrite_model_path(fitted, checkpoint, rewritten)

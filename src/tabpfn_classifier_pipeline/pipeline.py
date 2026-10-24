@@ -14,6 +14,8 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
+import re
 import shutil
 import tempfile
 import zipfile
@@ -71,6 +73,25 @@ def sha256_file(path: str | Path) -> str:
         for chunk in iter(lambda: handle.read(1 << 20), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+# tabpfn 8.1.0 reads checkpoints with torch.load and weights_only=None (tabpfn/checkpoint.py:73). That is restricted only because
+# torch >= 2.6 turns None into True; an older torch, or TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD set to a truthy value, makes it a full unpickle.
+_TORCH_TRUTHY = {"1", "y", "yes", "true"}
+_MIN_TORCH = (2, 6)
+
+
+def require_weights_only_load(torch_version: str | None = None) -> None:
+    """Refuse to continue unless a TabPFN checkpoint would load with weights_only=True. ``torch_version`` is for tests."""
+    if os.environ.get("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "").strip().lower() in _TORCH_TRUTHY:
+        raise RuntimeError("Refusing to load a TabPFN checkpoint: TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD is set, which would make torch.load unpickle it without weights_only; unset it.")
+    if torch_version is None:
+        import torch
+
+        torch_version = torch.__version__
+    match = re.match(r"(\d+)\.(\d+)", torch_version)
+    if match is None or (int(match[1]), int(match[2])) < _MIN_TORCH:
+        raise RuntimeError(f"Refusing to load a TabPFN checkpoint: torch {torch_version} is older than 2.6, so torch.load would not default to weights_only=True; install torch>=2.6.")
 
 
 def _read_manifest(root: Path) -> dict[str, Any]:
@@ -514,6 +535,7 @@ class TabPFNClassifierPipeline:
         return cls(weights_path=root / WEIGHTS_FILE, device=device, n_estimators=n_estimators, random_state=random_state)
 
     def _build_estimator(self) -> Any:
+        require_weights_only_load()
         from tabpfn import TabPFNClassifier
 
         return TabPFNClassifier(model_path=str(self.weights_path), device=self.device, n_estimators=self.n_estimators, random_state=self.random_state, show_progress_bar=False)
@@ -598,6 +620,7 @@ class TabPFNClassifierPipeline:
 
             device = "cuda" if torch.cuda.is_available() else "cpu"
         if loader is None:
+            require_weights_only_load()
             from tabpfn.model_loading import load_fitted_tabpfn_model
 
             def loader(fitted: Path, dev: str) -> Any:
