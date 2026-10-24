@@ -1,6 +1,8 @@
 asset=tabpfn_classifier_artifact.zip
 sha256=8fe248e2f9841c452316d07ee3e88e5fcde89ec458ff630954028b1c22df1054
 tools: picklescan 1.0.5, joblib 1.6.0, numpy 2.5.4, python 3.13.16
+-- tabpfn_classifier_artifact.zip [archive] EXTRACTED
+   3 members queued
 -- model.tabpfn_fit [archive] EXTRACTED
    3 members queued
 -- model.ckpt [pytorch-zip] EXTRACTED
@@ -70,7 +72,7 @@ tools: picklescan 1.0.5, joblib 1.6.0, numpy 2.5.4, python 3.13.16
    suspicious tabpfn.preprocessing.torch.torch_squashing_scaler.TorchSquashingScaler
    suspicious tabpfn.preprocessing.torch.torch_svd.TorchSafeStandardScaler
 -- model.ckpt!/archive/data.pkl [pickle] CLEAN
-   method: picklescan 1.0.5 (bytes)
+   method: picklescan 1.0.5 (bytes); restricted load (joblib 1.6.0, numpy 2.5.4)
    innocuous  collections.OrderedDict
    innocuous  torch.FloatStorage
    innocuous  torch._utils._rebuild_tensor_v2

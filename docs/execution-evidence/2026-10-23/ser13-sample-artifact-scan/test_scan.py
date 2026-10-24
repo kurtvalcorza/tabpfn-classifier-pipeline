@@ -67,7 +67,8 @@ def test_joblib_inventory_lists_only_real_globals(tmp_path):
     jb = joblib_bytes({"a": np.arange(1000.0), "od": collections.OrderedDict(x=1)}, tmp_path, "c.joblib")
     status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"c.joblib": jb}))
     assert status == 0, text
-    names = [line.split()[-1] for line in text.splitlines() if line.startswith("   ") and "method" not in line]
+    names = [line.split()[-1] for line in text.splitlines()
+             if line.split()[:1] in (["innocuous"], ["suspicious"], ["dangerous"])]
     assert all(n.split(".")[0] in {"numpy", "joblib", "collections", "builtins", "copyreg"} for n in names), names
 
 
@@ -286,3 +287,108 @@ def test_zlib_any_window_size_is_incomplete(tmp_path, wbits):
     status, text = run(tmp_path, make_zip(tmp_path / f"z{wbits}.zip", {"model.bin.z": data}))
     assert status == 2, text
     assert "compressed (zlib)" in text
+
+
+# --- Codex round on the frozen-scope heads (scan.py v4) ---------------------------------------------
+
+def _zip_bytes(members):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+    return buf.getvalue()
+
+
+def _npy(descr_literal: str, payload: bytes) -> bytes:
+    header = "{'descr': " + descr_literal + ", 'fortran_order': False, 'shape': (1,), }"
+    header = header.ljust(117 - 10) + "\n"
+    return b"\x93NUMPY\x01\x00" + len(header).to_bytes(2, "little") + header.encode("latin-1") + payload
+
+
+def _legacy_torch(final: bytes) -> bytes:
+    return b"".join(pickle.dumps(x, protocol=2) for x in (0x1950A86A20F9469CFC6C, 1001, {"x": 1})) + final
+
+
+def test_pickle_in_front_of_the_outer_asset_is_judged(tmp_path):
+    asset = tmp_path / "a.zip"
+    asset.write_bytes(PROTO0_EVIL + _zip_bytes({"info.json": b"{}"}))
+    status, text = run(tmp_path, asset)
+    assert status == 1, text
+    assert "a.zip [pickle+archive] DANGEROUS" in text
+
+
+def test_torch_payload_inside_an_object_npy_is_captured(tmp_path):
+    payload = _legacy_torch(EVIL)
+    outer = (b"\x80\x03ctorch.storage\n_load_from_bytes\n" + b"B" + len(payload).to_bytes(4, "little")
+             + payload + b"\x85R.")
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"x.npy": _npy("'|O'", outer)}))
+    assert status == 1, text
+    assert "[legacy-torch] DANGEROUS" in text
+
+
+@pytest.mark.parametrize("descr", ['"O"', "'|O8'", "'object'", "[('a', 'O')]"])
+def test_every_object_dtype_spelling_is_scanned(tmp_path, descr):
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"x.npy": _npy(descr, EVIL)}))
+    assert status == 1, text
+
+
+def test_unreadable_npy_header_is_incomplete(tmp_path):
+    data = b"\x93NUMPY\x01\x00" + (20).to_bytes(2, "little") + b"{'descr': <<broken>>"
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"x.npy": data}))
+    assert status == 2, text
+
+
+def test_memo_aliased_global_is_resolved(tmp_path):
+    # protocol 4: memoize 'os' and 'system' at 0/1, copy them to 2/3, resolve from the copies
+    stream = (b"\x80\x04\x8c\x02os\x94\x8c\x06system\x94"
+              b"h\x00q\x02h\x01q\x03" b"0000" b"h\x02h\x03\x93.")
+    assert scan.reads_to_end(stream)
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"state.pkl": stream}))
+    assert status == 1, text
+    assert "os.system" in text
+
+
+def test_zip_tar_polyglot_is_unpacked_both_ways(tmp_path):
+    import tarfile
+    tar = tmp_path / "t.tar"
+    with tarfile.open(tar, "w") as tf:
+        info = tarfile.TarInfo("evil.pkl")
+        info.size = len(EVIL)
+        tf.addfile(info, io.BytesIO(EVIL))
+    dual = tar.read_bytes() + _zip_bytes({"info.json": b"{}"})
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"dual.bin2": dual}))
+    assert status == 1, text
+    assert "dual.bin2!tar/evil.pkl [pickle] DANGEROUS" in text
+
+
+def test_protocol2_bytes_payload_is_rebuilt_and_scanned(tmp_path):
+    payload = _legacy_torch(EVIL)
+    text_u = payload.decode("latin-1").encode("utf-8")
+    outer = (b"\x80\x02ctorch.storage\n_load_from_bytes\n"
+             b"c_codecs\nencode\n" + b"X" + len(text_u).to_bytes(4, "little") + text_u
+             + b"X\x06\x00\x00\x00latin1\x86R" + b"\x85R.")
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"state.pkl": outer}))
+    assert status == 1, text
+    assert "[legacy-torch] DANGEROUS" in text
+
+
+def test_picklescan_error_does_not_discard_a_dangerous_global(tmp_path):
+    # a standalone STACK_GLOBAL in a second stream makes picklescan raise; the first stream's global stays
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"blob.xyz": EVIL + b"\x93."}))
+    assert status == 1, text
+
+
+def test_persistent_ids_in_torch_pickles_parse_to_the_end(tmp_path):
+    # torch's data.pkl references storages with BINPERSID; the restricted load must read past them
+    class P(pickle.Pickler):
+        def persistent_id(self, obj):
+            return ("storage", "FloatStorage", "0", "cpu", 4) if obj == "STORAGE" else None
+    buf = io.BytesIO()
+    P(buf, protocol=2).dump(collections.OrderedDict(w="STORAGE"))
+    pt = io.BytesIO()
+    with zipfile.ZipFile(pt, "w") as zf:
+        zf.writestr("archive/data.pkl", buf.getvalue())
+        zf.writestr("archive/data/0", b"\x00" * 16)
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.pt": pt.getvalue()}))
+    assert status == 0, text
+    assert "data.pkl [pickle] CLEAN" in text
