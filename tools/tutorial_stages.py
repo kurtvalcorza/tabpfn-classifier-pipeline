@@ -244,7 +244,9 @@ def stage_weights(run: Run) -> None:
     print({"weights_dir": str(snapshot), "fetched": fetched})
     verified = P.verify_snapshot(snapshot)
     print({"verified_files": len(verified["files"]), "revision": verified["revision"], "checkpoint": P.WEIGHTS_FILE, "sha256": P.WEIGHTS_SHA256})
-    run.write_state("weights.json", {"snapshot": str(snapshot), "checkpoint": str(snapshot / P.WEIGHTS_FILE)})
+    served = P.ensure_converted(snapshot)
+    print({"served_file": P.CONVERTED_FILE, "sha256": P.CONVERTED_SHA256, "bytes": P.CONVERTED_BYTES, "converted_from": P.WEIGHTS_FILE})
+    run.write_state("weights.json", {"snapshot": str(snapshot), "checkpoint": str(snapshot / P.WEIGHTS_FILE), "served": str(served)})
 
 
 def stage_data(run: Run) -> None:
@@ -568,7 +570,8 @@ def stage_predict(run: Run) -> None:
         "model_id": P.MODEL_ID,
         "model_revision": P.MODEL_REVISION,
         "model_license": P.MODEL_LICENSE,
-        "model_file": P.WEIGHTS_FILE,
+        "model_file": P.CONVERTED_FILE,
+        "source_checkpoint": P.WEIGHTS_FILE,
         "runtime": {"python": platform.python_version(), "torch": torch.__version__, "tabpfn": importlib.metadata.version("tabpfn"), "pandas": pd.__version__, "scikit_learn": importlib.metadata.version("scikit-learn"), "device": fresh.device},
     }
     run.write_output(f"{STEM}_result.json", payload)

@@ -7,6 +7,11 @@ here (private code; TabPFN-3 weights are non-commercial). This module owns the p
 contract (DAT24), the ICL fit / predict / evaluate calls, the ``model.tabpfn_fit`` + ``model.ckpt`` +
 ``artifact_manifest.json`` bundle the serving path consumes, its pre-load validation, and the evaluation report
 (EVAL21). ``tabpfn`` / ``torch`` are imported lazily inside the functions that need them.
+
+Serving reads only safetensors: ``from_pretrained`` converts the digest-checked pinned ``.ckpt`` once
+(``torch.load(weights_only=True)``) into ``CONVERTED_FILE``, checks it against ``CONVERTED_SHA256``, and the estimator
+is built from that file, which tabpfn 8.1.0 opens with ``safetensors.safe_open`` (no ``torch.load``). The ``.ckpt`` is
+still staged and verified, because the artifact bundle's ``model.ckpt`` is a byte copy of it (bundle format unchanged).
 """
 # ruff: noqa: E501  -- contract dictionaries and messages are kept on single lines
 from __future__ import annotations
@@ -37,6 +42,11 @@ MANIFEST_NAME = "dimer-base-manifest.json"
 WEIGHTS_FILE = "tabpfn-v3-classifier-v3_default.ckpt"
 WEIGHTS_SHA256 = "d0d865d54dfbc524f5703104be90620182dca7e5fb2c16de72e9959ea18f3988"
 WEIGHTS_BYTES = 212804803
+# The served file: WEIGHTS_FILE converted by safetensors_weights.convert_checkpoint (tabpfn's own safetensors layout,
+# sorted header). Byte-reproducible; the digest below is what two independent conversions produced.
+CONVERTED_FILE = "tabpfn-v3-classifier-v3_default.safetensors"
+CONVERTED_SHA256 = "f1f5408aeeffdcdfaf4842f0eff072c67ff3fbbb2c29d46d14eb564190d0b7d2"
+CONVERTED_BYTES = 212699804
 MODEL_VERSION = "v3"
 TABPFN_VERSION = "8.1.0"
 
@@ -146,6 +156,24 @@ def stage_missing_files(weights_dir: str | Path | None = None, *, allow_download
         if not (root / rel).is_file():
             raise FileNotFoundError(f"download did not produce {root / rel}")
     return missing
+
+
+def ensure_converted(weights_dir: str | Path | None = None) -> Path:
+    """Return the verified ``CONVERTED_FILE`` under ``weights_dir``, converting the pinned checkpoint once if it is absent.
+
+    An existing file is used only when its size and SHA-256 match the pins; otherwise the source ``.ckpt`` (re-hashed
+    against ``WEIGHTS_SHA256``) is read with ``torch.load(weights_only=True)`` and the result must equal
+    ``CONVERTED_SHA256`` before it is moved into place."""
+    from .safetensors_weights import convert_checkpoint
+    from .safetensors_weights import sha256_file as _sha256
+
+    root = Path(weights_dir or DEFAULT_WEIGHTS_DIR)
+    target = root / CONVERTED_FILE
+    if target.is_file() and target.stat().st_size == CONVERTED_BYTES and _sha256(target) == CONVERTED_SHA256:
+        return target
+    require_weights_only_load()
+    convert_checkpoint(root / WEIGHTS_FILE, target, expected_sha256=WEIGHTS_SHA256, source_name=WEIGHTS_FILE, expected_converted_sha256=CONVERTED_SHA256)
+    return target
 
 
 # --------------------------------------------------------------------------- datasets
@@ -511,7 +539,11 @@ def _coerce_non_json_init_params(model: Any) -> None:
 
 @dataclass
 class TabPFNClassifierPipeline:
-    """The verified TabPFN-3 checkpoint plus, after ``fit`` or ``from_artifact``, an in-context-fitted estimator."""
+    """The verified TabPFN-3 weights plus, after ``fit`` or ``from_artifact``, an in-context-fitted estimator.
+
+    ``weights_path`` is the file the estimator loads (``CONVERTED_FILE`` from ``from_pretrained``; an artifact's
+    ``model.ckpt`` from ``from_artifact``). ``checkpoint_path`` is the verified source ``.ckpt`` that ``save_artifact``
+    byte-copies into the bundle; it defaults to ``weights_path``."""
 
     weights_path: Path
     device: str = "cpu"
@@ -522,17 +554,19 @@ class TabPFNClassifierPipeline:
     feature_columns: list[str] | None = None
     classes: list[str] | None = None
     _model: Any = None
+    checkpoint_path: Path | None = None
 
     @classmethod
     def from_pretrained(cls, device: str | None = None, weights_dir: str | Path | None = None, allow_download: bool = False, *, n_estimators: int = DEFAULT_N_ESTIMATORS, random_state: int = DEFAULT_SEED) -> TabPFNClassifierPipeline:
         root = Path(weights_dir or DEFAULT_WEIGHTS_DIR)
         stage_missing_files(root, allow_download=allow_download)
         verify_snapshot(root)
+        converted = ensure_converted(root)
         if device is None:
             import torch
 
             device = "cuda" if torch.cuda.is_available() else "cpu"
-        return cls(weights_path=root / WEIGHTS_FILE, device=device, n_estimators=n_estimators, random_state=random_state)
+        return cls(weights_path=converted, device=device, n_estimators=n_estimators, random_state=random_state, checkpoint_path=root / WEIGHTS_FILE)
 
     def _build_estimator(self) -> Any:
         require_weights_only_load()
@@ -580,6 +614,9 @@ class TabPFNClassifierPipeline:
     def save_artifact(self, artifact_dir: str | Path, *, saver: Callable[[Any, Path], None] | None = None) -> dict[str, Any]:
         """Write ``model.tabpfn_fit`` + ``model.ckpt`` (byte copy of the verified checkpoint) + ``artifact_manifest.json``."""
         model = self._require()
+        checkpoint = Path(self.checkpoint_path or self.weights_path)
+        if checkpoint.suffix != ".ckpt":
+            raise ValueError(f"the bundle's {CHECKPOINT_NAME} is a byte copy of the source checkpoint; {checkpoint.name} is not one (set checkpoint_path)")
         root = Path(artifact_dir)
         root.mkdir(parents=True, exist_ok=True)
         if saver is None:
@@ -590,7 +627,7 @@ class TabPFNClassifierPipeline:
                 save_fitted_tabpfn_model(estimator, path)
 
         saver(model, root / FITTED_NAME)
-        shutil.copyfile(self.weights_path, root / CHECKPOINT_NAME)
+        shutil.copyfile(checkpoint, root / CHECKPOINT_NAME)
         manifest = {
             "schemaVersion": ARTIFACT_SCHEMA_VERSION,
             "taskType": TASK_TYPE,
