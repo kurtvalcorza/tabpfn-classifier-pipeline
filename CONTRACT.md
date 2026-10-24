@@ -91,9 +91,10 @@ for the production profile.
                "validation": { "accuracy": .., "balancedAccuracy": .., "logLoss": .., "rocAuc*": .. },
                "test": { .. | null } },
   "artifacts": {
-    "modelArtifact":    { "path": "fine-tuning/<run_id>/artifacts/model.tabpfn_fit",
-                          "name": "model.tabpfn_fit", "contentType": "application/octet-stream",
-                          "sizeBytes": N },
+    "modelArtifact":    { "path": "fine-tuning/<run_id>/artifacts/model.safetensors",
+                          "name": "model.safetensors", "contentType": "application/octet-stream",
+                          "sizeBytes": N, "sha256": ".." },
+    "fittedEstimator":  { "path": "fine-tuning/<run_id>/artifacts/model.tabpfn_fit", "..": ".." },
     "evaluationReport": { "path": "fine-tuning/<run_id>/evaluation/report.json", "..": ".." },
     "logArtifact":      { "path": "fine-tuning/<run_id>/logs/run-summary.json", "..": ".." },
     "foundationCheckpoint": { "path": "fine-tuning/<run_id>/artifacts/model.safetensors", "..": ".." },
