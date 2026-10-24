@@ -34,6 +34,6 @@ unpickles it. A pretrained v1 bundle stays bound to the source checkpoint (`WEIG
 `payloadFiles` / `foundationCheckpointBytes`; a v1 manifest naming `model.safetensors` or carrying v2-only fields; any
 other `schemaVersion`; a directory or ZIP holding both `model.safetensors` and `model.ckpt`; a size or digest mismatch.
 
-**Sample artifacts.** `sample-artifact-synthetic-v1` (v1) stays the notebooks' default. Its v2 re-issue
-`sample-artifact-synthetic-v2` (fitted archive byte-identical, weights = the pinned conversion, a `reissue` block in the
-manifest) is staged and pinned in code, not published; the default moves to it once it is.
+**Sample artifacts.** `sample-artifact-synthetic-v2` (v2) is the notebook's default: the re-issue of
+`sample-artifact-synthetic-v1` (fitted archive byte-identical, weights = the pinned conversion, a `reissue` block in the
+manifest), published and pinned in code. The v1 asset stays published and readable through the deprecated v1 path.

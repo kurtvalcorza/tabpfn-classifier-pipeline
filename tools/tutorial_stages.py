@@ -56,10 +56,13 @@ RUN7_DEVIATION = (
 # (`outputs/tabpfn_classifier_artifact.zip`) of a recorded earlier hosted run of this notebook's default path (SART8,
 # SART9). It is pinned by URL and SHA-256 and never replaced; a changed artifact gets a new tag and a new pin (SART7,
 # SART11). The export of the current run is never used as the external artifact (XAS2).
-SAMPLE_ARTIFACT_TAG = "sample-artifact-synthetic-v1"
-SAMPLE_ARTIFACT_URL = "https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/sample-artifact-synthetic-v1/tabpfn_classifier_artifact.zip"  # literal: validators allow only this exact URL
-SAMPLE_ARTIFACT_SHA256 = "8fe248e2f9841c452316d07ee3e88e5fcde89ec458ff630954028b1c22df1054"
-SAMPLE_ARTIFACT_BYTES = 197068508
+# The default is the bundle-format-v2 re-issue (model.safetensors, the pinned conversion) of the recorded run's v1 export:
+# model.tabpfn_fit byte-identical (so the fitted digest is unchanged), every other manifest field unchanged, plus a
+# recorded `reissue` block. It is not the export of a new hosted run.
+SAMPLE_ARTIFACT_TAG = "sample-artifact-synthetic-v2"
+SAMPLE_ARTIFACT_URL = "https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/sample-artifact-synthetic-v2/tabpfn_classifier_artifact.zip"  # literal: validators allow only this exact URL
+SAMPLE_ARTIFACT_SHA256 = "8828df98a2db8047bc2d52313a5a173bfa499d8b780619899def268dee31b41c"
+SAMPLE_ARTIFACT_BYTES = 197034023
 SAMPLE_ARTIFACT_FITTED_SHA256 = "1f48ecaf118c834633c8c000579e3f68227cf11c9ae0b146b68509f6f3bb9af6"  # the run's printed EXPECTED_FITTED_SHA256
 # Trust note (ARTIFACT_SPEC SER9): model.tabpfn_fit is code-capable. from_artifact reloads it by unpickling its joblib
 # state, so it is
@@ -70,13 +73,13 @@ SAMPLE_ARTIFACT_PRODUCER = {
     "commit": "7fce7f931e9f65c7d406d436b912f754d3cfb1d1",
     "run": "recorded hosted Colab T4 run; the release notes of the tag name the run record (SART8)",
     "release_tag": SAMPLE_ARTIFACT_TAG,
+    "reissue": "bundle format v2 re-issue of that run's v1 export (release sample-artifact-synthetic-v1) at code commit ee79cab; not a new run",
 }
-# Staged, NOT published: the v2 re-issue (bundle format v2, model.safetensors) of the v1 asset above, built
-# deterministically by re-issuing v1 (model.tabpfn_fit byte-identical, weights = the pinned conversion, a reissue block in
-# the manifest). The default stays on v1 until this tag is published; then the four SAMPLE_ARTIFACT_* pins above move to it.
-SAMPLE_ARTIFACT_V2_TAG = "sample-artifact-synthetic-v2"
-SAMPLE_ARTIFACT_V2_SHA256 = "8828df98a2db8047bc2d52313a5a173bfa499d8b780619899def268dee31b41c"
-SAMPLE_ARTIFACT_V2_BYTES = 197034023
+# The superseded v1 sample artifact (deprecated v1 layout, model.ckpt). It stays published and readable through the legacy
+# path (torch.load(weights_only=True), DeprecationWarning) when given as your own artifact; it is not the default.
+SAMPLE_ARTIFACT_V1_TAG = "sample-artifact-synthetic-v1"
+SAMPLE_ARTIFACT_V1_SHA256 = "8fe248e2f9841c452316d07ee3e88e5fcde89ec458ff630954028b1c22df1054"
+SAMPLE_ARTIFACT_V1_BYTES = 197068508
 SAMPLE_ARTIFACT_MAX_BYTES = 512 * 1024 * 1024  # a download larger than this is refused before it is hashed or opened
 EXTERNAL_DIR = "external_artifact"  # under outputs/: the section's predictions and provenance (XAS6)
 EXTERNAL_SAMPLE_ROWS = 8

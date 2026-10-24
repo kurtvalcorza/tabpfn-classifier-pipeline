@@ -121,7 +121,7 @@ NOTEBOOKS = {
             '"model_license": P.MODEL_LICENSE',
             'importlib.metadata.version("tabpfn")',
             "Trusted digests of this export",
-            'SAMPLE_ARTIFACT_URL = "https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/sample-artifact-synthetic-v1/tabpfn_classifier_artifact.zip"',
+            'SAMPLE_ARTIFACT_URL = "https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/sample-artifact-synthetic-v2/tabpfn_classifier_artifact.zip"',
             'SAMPLE_ARTIFACT_SHA256 = "',
             'SAMPLE_ARTIFACT_FITTED_SHA256 = "',
             'EXTERNAL_DIR = "external_artifact"',
@@ -287,7 +287,7 @@ KERNEL_INSTALL = re.compile(r"['\"]-m['\"]\s*,\s*['\"]pip['\"]|^\s*[%!]\s*pip\b|
 # ST1 / SART6: the only github.com/kurtvalcorza reference allowed anywhere in tutorial code is the exact pinned sample-artifact
 # URL of the external-artifact section, in the stage runner only. It is built here from the tag and compared whole: no prefix
 # match, and a reference holding "..", "%2e" (any case), "?" or "#" is refused even before the comparison.
-SAMPLE_ARTIFACT_TAG = "sample-artifact-synthetic-v1"
+SAMPLE_ARTIFACT_TAG = "sample-artifact-synthetic-v2"
 PINNED_SAMPLE_ARTIFACT_URL = f"https://github.com/kurtvalcorza/{REPO_NAME}/releases/download/{SAMPLE_ARTIFACT_TAG}/tabpfn_classifier_artifact.zip"
 _OWN_REFERENCE = re.compile(r"github\.com/kurtvalcorza", re.I)
 _REFERENCE_STOP = set(" \t\r\n'\"`<>()[]{},;\\")
