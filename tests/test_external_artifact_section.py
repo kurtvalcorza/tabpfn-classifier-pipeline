@@ -32,8 +32,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
 E2E = ROOT / "tutorials" / "tabpfn_classifier_colab.ipynb"
-PINNED_URL = "https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/sample-artifact-synthetic-v1/tabpfn_classifier_artifact.zip"
-PINNED_SHA256 = "8fe248e2f9841c452316d07ee3e88e5fcde89ec458ff630954028b1c22df1054"
+PINNED_URL = "https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/sample-artifact-synthetic-v2/tabpfn_classifier_artifact.zip"
+PINNED_SHA256 = "8828df98a2db8047bc2d52313a5a173bfa499d8b780619899def268dee31b41c"
 PINNED_FITTED_SHA256 = "1f48ecaf118c834633c8c000579e3f68227cf11c9ae0b146b68509f6f3bb9af6"
 SECTION_START = "## 10. Using an artifact made elsewhere"
 SECTION_END = "## 11. Optional activity"
@@ -89,7 +89,8 @@ def test_section_pins_the_release_asset_by_url_and_digests() -> None:
     assert STAGES.SAMPLE_ARTIFACT_SHA256 == PINNED_SHA256
     assert STAGES.SAMPLE_ARTIFACT_FITTED_SHA256 == PINNED_FITTED_SHA256
     assert STAGES.SAMPLE_ARTIFACT_PRODUCER["commit"].startswith("7fce7f9")
-    assert STAGES.SAMPLE_ARTIFACT_PRODUCER["release_tag"] == STAGES.SAMPLE_ARTIFACT_TAG == "sample-artifact-synthetic-v1"
+    assert STAGES.SAMPLE_ARTIFACT_PRODUCER["release_tag"] == STAGES.SAMPLE_ARTIFACT_TAG == "sample-artifact-synthetic-v2"
+    assert "sample-artifact-synthetic-v1" in STAGES.SAMPLE_ARTIFACT_PRODUCER["reissue"]
 
 
 def test_default_path_fetches_the_pin_and_never_this_runs_export(tmp_path, monkeypatch) -> None:
@@ -420,8 +421,8 @@ _REPO = "https://github.com/kurtvalcorza/tabpfn-classifier-pipeline"
         f"{_REPO}/releases/download/sample-artifact-synthetic-v1/tabpfn_classifier_artifact.zip#x",
         "https://github.com/kurtvalcorza/tabicl-classifier-pipeline/releases/download/sample-artifact-magic-v1/tabiclv2_classifier_artifact.zip",
         f"{_REPO}/releases/download/sample-bundle-v1/tabpfn_classifier_sample_bundle.zip",
-        f"{_REPO}/releases/download/sample-artifact-synthetic-v2/tabpfn_classifier_artifact.zip",
-        f"{_REPO}/releases/download/sample-artifact-synthetic-v1/tabpfn_classifier_artifact.zip.sig",
+        f"{_REPO}/releases/download/sample-artifact-synthetic-v1/tabpfn_classifier_artifact.zip",
+        f"{_REPO}/releases/download/sample-artifact-synthetic-v2/tabpfn_classifier_artifact.zip.sig",
         f"{_REPO}.git",
     ],
     ids=["traversal", "tag-then-traversal", "pct2e", "pct2E-uppercase-host", "query", "fragment", "other-repo", "other-tag-old-bundle", "other-tag", "suffix", "clone"],
