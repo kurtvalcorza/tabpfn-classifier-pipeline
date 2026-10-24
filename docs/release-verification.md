@@ -189,6 +189,43 @@ replaced by `<local-run-dir>` before the first commit:
 | `tabpfn_classifier_colab_9e69f88_colab-cli-t4_activity_run_copy.ipynb` | `e9d59aef2f2a891f18ba616d5d97b9f48e34ae75e66c224225b7385ee22564ab` | unchanged (no local path) |
 | `tabpfn_classifier_colab_9e69f88_colab-cli-t4_activity_run_summary.json` | `3babac27e56c93db90bb29ba08b8a1f1a31fe2c4a8c814a559913bf74be85a2c` | unchanged (no local path) |
 
+**Hosted default-path run of blob `41dc2a680767` (2026-10-24, `641152f`, PR #29 head).** Colab CLI `colab exec -f`
+(a scripted run, not a browser Run all) on a fresh Colab Tesla T4, default path of `tutorials/tabpfn_classifier_colab.ipynb`
+at `641152f`, executed as committed, started 2026-10-24T11:33:58Z, wall 149.4 s, exit 0, sequential, input unchanged, 14/14
+code cells, 0 errors, verdict PASS. Evidence: `docs/execution-evidence/2026-10-24-641152f/`. Printed: torch 2.11.0, tabpfn
+8.1.0 (cuda); checkpoint `tabpfn-v3-classifier-v3_default.ckpt` at revision `24a16a89d245` with SHA-256 `d0d865d5…f3988`;
+majority-class baseline validation accuracy 0.3333; TabPFN validation accuracy 0.9778 / log loss 0.0658 / ROC AUC 0.9994,
+test accuracy 0.9778 / log loss 0.0794 / ROC AUC 0.9978; logistic-regression reference 0.9111 (validation) / 0.9444 (test);
+"Fresh-boundary verification PASSED: probabilities equivalent on 90 validation rows (rtol=1e-05, atol=1e-06)"; Section 10
+reported `trusted_digest: verified (pinned SAMPLE_ARTIFACT_SHA256 and SAMPLE_ARTIFACT_FITTED_SHA256)` for `8fe248e2…`; the
+activity cell printed "Optional activity skipped". This run's own export printed `EXPECTED_ZIP_SHA256 = '9620244c…9e89'` and
+`EXPECTED_FITTED_SHA256 = '66b94274…c073'`. No output mentions the new `weights_only` guard (torch 2.11.0 is above its
+2.6 floor), so its refusal branch was not exercised. Local paths were replaced by `<local-run-dir>` before the first commit:
+
+| File (under `execution-evidence/2026-10-24-641152f/`) | Captured | Committed |
+|---|---|---|
+| `tabpfn_classifier_colab_641152f_colab-cli-t4.ipynb` | `51e452d28b925e05516ce1c05b781d85fb1c87826f8ab2ba720b709d23943aff` | unchanged (no local path) |
+| `tabpfn_classifier_colab_641152f_colab-cli-t4_exec.log` | `9a868f899c797693cdfbbbd94acd5c86d406abb7d21148c499451c445a56c9bc` | `c2b8b665af7693da54f2a39db55e6a4325d48fc2352625aaa5a7cc0d0ac3ff27` (2 replacements) |
+| `tabpfn_classifier_colab_641152f_colab-cli-t4_run_summary.json` | `0ac210183ea3a18c599bee514670bacfc44cc70b5f6e89ebf7ea58ee71355c87` | unchanged (no local path) |
+
+**Optional-activity run of blob `41dc2a680767` (2026-10-24, `641152f`, `RUN_ACTIVITY = True`, PR #29 head).** A run copy
+of committed blob `41dc2a68` with one override, `RUN_ACTIVITY = False` → `True` (run copy blob `67407170f07c`, SHA-256
+`f73f67d818f052e5c55e9090a18099ff92fd05fc2874a947ef0b083abcee7940`; it differs from the committed blob only in that assignment
+literal and is committed beside the evidence as `…_activity_run_copy.ipynb`), run by Colab CLI `colab exec -f` (scripted, not a
+browser Run all) on a fresh Colab Tesla T4, started 2026-10-24T12:56:15Z, wall 147.6 s, exit 0, sequential, input (the run copy)
+unchanged, 14/14 code cells, 0 errors, verdict PASS. Evidence: `docs/execution-evidence/2026-10-24-641152f-activity/`. The
+canonical stages printed the same metrics as the default-path run above. The Section 11 activity (`n_estimators` 4 → 1)
+printed validation accuracy 0.9778 → 0.9778, log loss 0.0658 → 0.0607, ROC AUC 0.9994 → 0.9998 on 90 validation rows,
+`max_abs_probability_change` 0.1001, `labels_changed` 0, and `{'canonical_outputs_unchanged': True}`. Local paths were
+replaced by `<local-run-dir>` before the first commit:
+
+| File (under `execution-evidence/2026-10-24-641152f-activity/`) | Captured | Committed |
+|---|---|---|
+| `tabpfn_classifier_colab_641152f_colab-cli-t4_activity.ipynb` | `b0d3edb4aaec03587624f8996480af6fe5d049572fb5d3cbf4bdb2f66ed2f1e8` | unchanged (no local path) |
+| `tabpfn_classifier_colab_641152f_colab-cli-t4_activity_exec.log` | `9605ab11bdf3d51fcd2787298dbd16090e4df75bb908df7c5a20348934f8e393` | `1a310f5d1e38ebef98e057ef7e87403bd5f365b7197b72a13736544745261a35` (2 replacements) |
+| `tabpfn_classifier_colab_641152f_colab-cli-t4_activity_run_copy.ipynb` | `f73f67d818f052e5c55e9090a18099ff92fd05fc2874a947ef0b083abcee7940` | unchanged (no local path) |
+| `tabpfn_classifier_colab_641152f_colab-cli-t4_activity_run_summary.json` | `89b7f5a9907e0d39b85ac5716393f20c7366d0366b5685965a6a608f441c3c29` | unchanged (no local path) |
+
 ### Local lock-only drives (not clean-runtime evidence)
 
 Code cells driven in order by a plain-CPython stand-in kernel on Linux x86_64 (WSL2), CPU only (`CUDA_VISIBLE_DEVICES=-1`), inside each notebook's own isolated hash-locked uv environment (CPython 3.12.12; torch 2.11.0, tabpfn 8.1.0, numpy 2.5.3, pandas 2.3.2, scikit-learn 1.9.0; 63 locked packages), default form values. The checkpoint was copied in from a local checkout and digest-verified (`d0d865d5…`), so the Hub download was not exercised; no notebook kernel, no Colab.
@@ -217,7 +254,7 @@ clean Colab record, are both still required before either notebook is marked rel
 
 ## Current status
 
-**Current status (2026-10-24): Candidate.** The current E2E notebook blob is `41dc2a68` (`tutorials/tabpfn_classifier_colab.ipynb`, regenerated from code commit `057ab9d` on `fix/torch-weights-only-guard`: the carried package refuses to load a TabPFN checkpoint when torch is older than 2.6 or `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD` is set, because tabpfn 8.1.0 loads with `weights_only=None`). It has no recorded hosted run until the orchestrator records one (REL14). The `9e69f88` default-path and optional-activity records (under *Recorded executions*) cover the previous blob `e705db6e` and are history, as are the `197d45b` records of blob `7d8051f7` and the earlier `fcfa6ff` record of blob `d766d7b7`. The notebook stays **Candidate** until a hosted default-path run and an optional-activity run (the owner's 2026-10-22 ruling) of the current blob and these two are recorded for it:
+**Current status (2026-10-24): Candidate.** The current E2E notebook blob is `41dc2a68` (`tutorials/tabpfn_classifier_colab.ipynb`, regenerated from code commit `057ab9d` on `fix/torch-weights-only-guard`: the carried package refuses to load a TabPFN checkpoint when torch is older than 2.6 or `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD` is set, because tabpfn 8.1.0 loads with `weights_only=None`). At commit `641152f` (the PR #29 head) its default path and, in a `RUN_ACTIVITY = True` run copy, its optional activity each ran once on a fresh hosted Colab T4 (2026-10-24, PASS, 14/14 code cells, 0 errors; the `641152f` records under *Recorded executions*), so the runs of this PR cover the default path and the activity. The `9e69f88` records of blob `e705db6e`, the `197d45b` records of blob `7d8051f7` and the earlier `fcfa6ff` record of blob `d766d7b7` are history (REL14). The notebook stays **Candidate** until these two are recorded for the current blob:
 
 - **REL12:** a BYOD run in which one representative input is accepted through the downstream stages and one incompatible input is refused;
 - **REL2:** a browser run of the interactive journeys (BYOD upload dialog, optional-activity toggle, own-artifact ZIP); the scripted CLI runs count for the default path and the activity only.
