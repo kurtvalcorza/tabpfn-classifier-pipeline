@@ -462,8 +462,8 @@ def stage_export(run: Run) -> None:
     (art / P.ARTIFACT_MANIFEST_NAME).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     zip_path = run.out / f"{STEM}_artifact.zip"
     zip_sha = P.zip_artifact_bundle(art, zip_path)
-    if manifest["foundationCheckpointSha256"] != P.WEIGHTS_SHA256:
-        raise RuntimeError("the bundled checkpoint is not the pinned foundation checkpoint")
+    if manifest["foundationCheckpointSha256"] != P.CONVERTED_SHA256:
+        raise RuntimeError("the bundled model.safetensors is not the pinned conversion of the foundation checkpoint")
     run.write_state("export_reference.json", {"proba": np.asarray(pipe.predict_proba(val[v["features"]])).tolist(), "accuracy": run.read_state("condition.json", "export")["validation"]["accuracy"], "device": pipe.device})
     record = {"artifact": sorted(p.name for p in art.iterdir()), "fittedEstimatorSha256": manifest["fittedEstimatorSha256"], "foundationCheckpointSha256": manifest["foundationCheckpointSha256"], "bundle_zip": zip_path.name, "bundle_zip_sha256": zip_sha}
     print(record)
@@ -482,8 +482,8 @@ def stage_reload(run: Run) -> None:
     fresh_dir = run.out / "artifact-reload"
     shutil.rmtree(fresh_dir, ignore_errors=True)
     shutil.copytree(run.out / "artifact", fresh_dir)
-    checked = P.validate_artifact_bundle(fresh_dir, expected_checkpoint_sha256=P.WEIGHTS_SHA256)
-    fresh = P.TabPFNClassifierPipeline.from_artifact(fresh_dir, device=reference["device"], expected_checkpoint_sha256=P.WEIGHTS_SHA256)
+    checked = P.validate_artifact_bundle(fresh_dir, pinned_base=True)
+    fresh = P.TabPFNClassifierPipeline.from_artifact(fresh_dir, device=reference["device"], pinned_base=True)
     if fresh.classes != v["classes"] or fresh.feature_columns != v["features"]:
         raise RuntimeError("reloaded artifact disagrees with the validated schema")
     proba = np.asarray(fresh.predict_proba(val[v["features"]]))
@@ -546,7 +546,7 @@ def stage_predict(run: Run) -> None:
             raise refusal(exc, {"new rows": Path(path).name, Path(path).name: Path(path).name}, Path(path).name, fix) from None
         raise coded(P, exc, "new rows") from None
     # The rows are checked before the model is loaded, so a refused file costs no model load (DAT19).
-    fresh = P.TabPFNClassifierPipeline.from_artifact(run.out / "artifact", device=cond["device"], expected_checkpoint_sha256=P.WEIGHTS_SHA256)
+    fresh = P.TabPFNClassifierPipeline.from_artifact(run.out / "artifact", device=cond["device"], pinned_base=True)
     scored = fresh.predict(features)
     out = pd.concat([rows[passthrough].reset_index(drop=True), scored.drop(columns=["row_id"]).reset_index(drop=True)], axis=1) if passthrough else scored
     out.to_csv(run.out / f"{STEM}_predictions.csv", index=False)
@@ -652,12 +652,14 @@ def fetch_pinned_artifact(cache: Path, url: str, expected: str) -> Path:
 
 
 def check_members(P, zip_path: Path) -> list[str]:
-    """The ZIP must hold exactly the three bundle members, each once, at the top level; anything else (an extra file, a
-    sub-directory copy that would overwrite a member when flattened) is refused before extraction."""
-    expected = {P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, P.CHECKPOINT_NAME}
+    """The ZIP must hold exactly the three bundle members of one layout (v2 ``model.safetensors`` or the deprecated v1
+    ``model.ckpt``), each once, at the top level; anything else (both checkpoints, an extra file, a sub-directory copy
+    that would overwrite a member when flattened) is refused before extraction."""
     with zipfile.ZipFile(zip_path) as archive:
         names = [info.filename for info in archive.infolist() if not info.is_dir()]
     bare = [PurePosixPath(n.replace("\\", "/")).name for n in names]
+    weights = P.LEGACY_CHECKPOINT_NAME if P.LEGACY_CHECKPOINT_NAME in bare and P.CHECKPOINT_NAME not in bare else P.CHECKPOINT_NAME
+    expected = {P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, weights}
     duplicates = sorted({b for b in bare if bare.count(b) > 1})
     if duplicates:
         raise ValueError(f"{zip_path.name}: members {duplicates} occur more than once (e.g. in a sub-directory); extraction would overwrite one with the other. Refusing the artifact.")
@@ -670,16 +672,20 @@ def check_members(P, zip_path: Path) -> list[str]:
 
 
 def check_base_model(P, manifest: dict[str, Any]) -> dict[str, Any]:
-    """The manifest must name the pinned base model carried by this notebook, and its ``model.ckpt`` must BE that
-    checkpoint (``validate_artifact_bundle`` checks the bytes against ``WEIGHTS_SHA256``), so a swapped, code-capable
+    """The manifest must name the pinned base model carried by this notebook, and its weights must BE that model: a v2
+    ``model.safetensors`` the pinned conversion (``CONVERTED_SHA256``), a deprecated v1 ``model.ckpt`` the pinned
+    checkpoint (``WEIGHTS_SHA256``); ``validate_artifact_bundle(pinned_base=True)`` checks the bytes. A swapped
     checkpoint behind a re-hashed manifest is refused."""
     base = manifest.get("baseModel") or {}
     declared = (base.get("modelId"), base.get("revision"), base.get("sha256"))
     if declared != (P.MODEL_ID, P.MODEL_REVISION, P.WEIGHTS_SHA256):
         raise RuntimeError(f"Artifact was not produced on the pinned base model carried by this notebook: declares {declared}, expected {(P.MODEL_ID, P.MODEL_REVISION, P.WEIGHTS_SHA256)}.")
-    if manifest.get("foundationCheckpointSha256") != P.WEIGHTS_SHA256:
-        raise RuntimeError(f"The artifact's model.ckpt must be the pinned TabPFN-3 checkpoint (SHA-256 {P.WEIGHTS_SHA256}); its manifest records {manifest.get('foundationCheckpointSha256')}. Refusing to load a different checkpoint.")
-    return {"mode": manifest.get("mode"), "checkpoint_binding": "identical to the pinned base checkpoint (SHA-256 checked)"}
+    layout = manifest.get("schemaVersion")
+    pinned = P.pinned_checkpoint_sha256(layout)
+    if manifest.get("foundationCheckpointSha256") != pinned:
+        raise RuntimeError(f"The artifact's {manifest.get('foundationCheckpoint')} must be the pinned TabPFN-3 weights for bundle layout v{layout} (SHA-256 {pinned}); its manifest records {manifest.get('foundationCheckpointSha256')}. Refusing to load a different checkpoint.")
+    binding = "identical to the pinned conversion of the base checkpoint (SHA-256 checked; bundle format v2)" if layout == P.ARTIFACT_SCHEMA_VERSION else "identical to the pinned base checkpoint (SHA-256 checked; deprecated bundle format v1, read with weights_only=True)"
+    return {"mode": manifest.get("mode"), "checkpoint_binding": binding}
 
 
 def check_numeric_features(name: str, rows, kinds: dict[str, str]):
@@ -779,8 +785,8 @@ def stage_external_artifact(run: Run) -> None:
     try:
         members = check_members(P, zip_path)
         P.safe_extract_zip(zip_path, bundle)
-        artifact = P.validate_artifact_bundle(bundle, expected_fitted_sha256=expected_fitted, expected_checkpoint_sha256=P.WEIGHTS_SHA256)
-        manifest = {k: v for k, v in artifact.items() if k not in ("verifiedSha256", "recordedModelPath")}
+        artifact = P.validate_artifact_bundle(bundle, expected_fitted_sha256=expected_fitted, pinned_base=True)
+        manifest = {k: v for k, v in artifact.items() if k not in ("verifiedSha256", "recordedModelPath", "layout")}
         binding = check_base_model(P, manifest)
     except (ValueError, RuntimeError, FileNotFoundError, zipfile.BadZipFile) as exc:
         if source != "own":
@@ -794,7 +800,7 @@ def stage_external_artifact(run: Run) -> None:
     record = {"source": source, "zip": zip_path.name, **trust, **binding, "members": members, "bundle": str(bundle), "manifest": manifest, "verifiedSha256": artifact["verifiedSha256"], "data_contract": "synthetic default path (features, target, classes and feature kinds match)" if contract else "not checked (your own artifact; your rows must follow its manifest)"}
     run.write_state("external_artifact.json", record)
     print({k: record[k] for k in ("source", "zip", "zip_sha256", "trusted_digest", "mode", "checkpoint_binding", "data_contract")})
-    print({"schemaVersion": manifest.get("schemaVersion"), "taskType": manifest.get("taskType"), "baseModel": manifest.get("baseModel"), "nEstimators": manifest.get("nEstimators"), "randomState": manifest.get("randomState"), "fittedEstimatorSha256": artifact["verifiedSha256"]["fittedEstimator"], "foundationCheckpointSha256": artifact["verifiedSha256"]["foundationCheckpoint"]})
+    print({"schemaVersion": manifest.get("schemaVersion"), "bundleFormat": manifest.get("bundleFormat", "v1 (deprecated: model.ckpt)"), "taskType": manifest.get("taskType"), "baseModel": manifest.get("baseModel"), "nEstimators": manifest.get("nEstimators"), "randomState": manifest.get("randomState"), "fittedEstimatorSha256": artifact["verifiedSha256"]["fittedEstimator"], "foundationCheckpointSha256": artifact["verifiedSha256"]["foundationCheckpoint"]})
     print({"featureColumns": len(manifest["featureColumns"]), "targetColumn": manifest["targetColumn"], "classes": manifest["classes"], "featureKinds": sorted(set((manifest.get("featureKinds") or {}).values()))})
 
 
@@ -806,7 +812,7 @@ def external_serving(run: Run):
     P = package(run.root)
     art = run.read_state("external_artifact.json", "external_reconstruct")
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    serving = P.TabPFNClassifierPipeline.from_artifact(Path(art["bundle"]), device=device, expected_fitted_sha256=art["verifiedSha256"]["fittedEstimator"], expected_checkpoint_sha256=P.WEIGHTS_SHA256)
+    serving = P.TabPFNClassifierPipeline.from_artifact(Path(art["bundle"]), device=device, expected_fitted_sha256=art["verifiedSha256"]["fittedEstimator"], pinned_base=True)
     manifest = art["manifest"]
     if serving.classes != [str(c) for c in manifest["classes"]] or serving.feature_columns != list(manifest["featureColumns"]):
         raise RuntimeError("Reconstructed estimator disagrees with the validated manifest.")

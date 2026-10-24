@@ -147,7 +147,7 @@ def test_stage_missing_files_uses_injected_downloader(tmp_path: Path, constants:
 def test_from_pretrained_binds_the_verified_checkpoint_without_tabpfn(tmp_path: Path, constants: None) -> None:
     root = _snapshot(tmp_path)
     pipe = api.TabPFNClassifierPipeline.from_pretrained(device="cpu", weights_dir=root)
-    assert pipe.weights_path == root / api.CONVERTED_FILE and pipe.checkpoint_path == root / api.WEIGHTS_FILE
+    assert pipe.weights_path == root / api.CONVERTED_FILE 
     assert pipe.source == "local-snapshot" and pipe.classes is None
     with pytest.raises(RuntimeError, match="fit"):
         pipe.predict(pd.DataFrame({"f1": [1.0]}))
@@ -242,7 +242,10 @@ def test_fit_predict_evaluate_save_and_reload(tmp_path: Path, constants: None) -
     artifact = tmp_path / "artifact"
     manifest = pipe.save_artifact(artifact, saver=fake_saver)
     assert manifest["classes"] == ["x", "y"] and manifest["baseModel"]["sha256"] == api.WEIGHTS_SHA256
-    assert api.sha256_file(artifact / api.CHECKPOINT_NAME) == api.WEIGHTS_SHA256
+    assert manifest["schemaVersion"] == 2 and manifest["bundleFormat"] == "tabpfn-dimer-classifier-v2" and manifest["modelPath"] == api.CHECKPOINT_NAME == "model.safetensors"
+    assert manifest["payloadFiles"] == sorted([api.FITTED_NAME, api.CHECKPOINT_NAME]) and manifest["foundationCheckpointBytes"] == (artifact / api.CHECKPOINT_NAME).stat().st_size
+    assert api.sha256_file(artifact / api.CHECKPOINT_NAME) == api.CONVERTED_SHA256 and not (artifact / api.LEGACY_CHECKPOINT_NAME).exists()
+    assert api.validate_artifact_bundle(artifact, pinned_base=True)["layout"] == 2
     checked = api.validate_artifact_bundle(artifact)
     assert checked["verifiedSha256"]["fittedEstimator"] == manifest["fittedEstimatorSha256"] and checked["recordedModelPath"] == "fake"
     with pytest.raises(ValueError, match="expected"):
