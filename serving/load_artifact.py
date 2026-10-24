@@ -15,8 +15,9 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 
-# tabpfn 8.1.0 reads checkpoints with torch.load and weights_only=None; that is restricted only on torch>=2.6
-# and only while TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD is unset. Same check as the package's require_weights_only_load.
+# tabpfn 8.1.0 reads checkpoints with torch.load and weights_only=None; that is restricted only on
+# torch>=2.6 and only while TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD is unset. Same check as the package's
+# require_weights_only_load.
 def require_weights_only_load(torch_version: str | None = None) -> None:
     """Refuse to continue unless a TabPFN checkpoint would load with weights_only=True."""
     if os.environ.get("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "").strip().lower() in {"1", "y", "yes", "true"}:

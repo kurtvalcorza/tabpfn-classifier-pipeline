@@ -1,14 +1,14 @@
 """TabPFN checkpoint loads must stay restricted to weights_only=True.
 
-tabpfn passes weights_only=None and relies on torch's default, so both guards (the package's and the standalone serving
-loader's) must refuse the two conditions that turn that default into a full unpickle. The offline tier has no torch, so the
-version is passed in.
+tabpfn passes weights_only=None and relies on torch's default, so both guards (the package's and the
+standalone serving loader's) must refuse the two conditions that turn that default into a full unpickle.
+The offline tier has no torch, so the version is passed in.
 """
 from __future__ import annotations
 
 import pytest
-
 from serving import load_artifact
+
 from tabpfn_classifier_pipeline import pipeline
 
 GUARDS = [pipeline.require_weights_only_load, load_artifact.require_weights_only_load]
