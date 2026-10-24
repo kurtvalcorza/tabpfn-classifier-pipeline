@@ -224,3 +224,65 @@ def test_random_tensor_bytes_are_not_pickle_content(tmp_path):
             zf.writestr(f"archive/data/{i}", rng.bytes(4096))
     status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.pt": pt.getvalue()}))
     assert status == 0, text
+
+
+def test_nested_archive_cannot_overwrite_a_queued_member(tmp_path):
+    # Codex (v2): inner.zip used to unpack into the predictable sibling inner.zip.x/
+    inner = io.BytesIO()
+    with zipfile.ZipFile(inner, "w") as zf:
+        zf.writestr("evil.pkl", CLEAN)
+    asset = make_zip(tmp_path / "a.zip", {"inner.zip": inner.getvalue(), "inner.zip.x/evil.pkl": EVIL})
+    status, text = run(tmp_path, asset)
+    assert status == 1, text
+    assert "inner.zip.x/evil.pkl [pickle] DANGEROUS" in text
+    assert "inner.zip!/evil.pkl [pickle] CLEAN" in text
+
+
+def test_one_invalid_global_does_not_hide_a_dangerous_one(tmp_path):
+    # Codex (v2): all(IDENT) let a later non-identifier global suppress os.system
+    stream = b"cos\nsystem\n(S'true'\ntRcbad-module\nunused\n."
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"notes.txt": stream}))
+    assert status == 1, text
+
+
+def test_object_npy_inside_npz_is_scanned(tmp_path):
+    # Codex (v2): the pickle behind an object-dtype .npy header was skipped
+    arr = np.empty(1, dtype=object)
+    arr[0] = os.system
+    buf = io.BytesIO()
+    np.save(buf, arr, allow_pickle=True)
+    npz = io.BytesIO()
+    with zipfile.ZipFile(npz, "w") as zf:
+        zf.writestr("arr_0.npy", buf.getvalue())
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"data.npz": npz.getvalue()}))
+    assert status == 1, text
+    assert "[npy-object] DANGEROUS" in text
+
+
+def test_plain_npy_is_not_pickle(tmp_path):
+    buf = io.BytesIO()
+    np.save(buf, np.arange(100.0))
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"x.npy": buf.getvalue()}))
+    assert status == 0, text
+
+
+def test_embedded_torch_payload_in_a_complete_pickle_is_scanned(tmp_path):
+    # Codex (v2): payload capture only ran when the outer pickle did not read to the end.
+    # Raw protocol-3 opcodes: GLOBAL torch.storage._load_from_bytes, BINBYTES payload, TUPLE1, REDUCE, STOP.
+    legacy = b"".join(pickle.dumps(x, protocol=2) for x in (0x1950A86A20F9469CFC6C, 1001, {"x": 1})) + EVIL
+    outer = (b"\x80\x03ctorch.storage\n_load_from_bytes\n" + b"B" + len(legacy).to_bytes(4, "little")
+             + legacy + b"\x85R.")
+    assert scan.reads_to_end(outer)
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"state.pkl": outer}))
+    assert status == 1, text
+    assert "[legacy-torch] DANGEROUS" in text
+
+
+@pytest.mark.parametrize("wbits", [9, 12, 15])
+def test_zlib_any_window_size_is_incomplete(tmp_path, wbits):
+    # Codex (v2): only the 32K-window zlib headers were recognised
+    co = __import__("zlib").compressobj(9, 8, wbits)
+    data = co.compress(EVIL) + co.flush()
+    status, text = run(tmp_path, make_zip(tmp_path / f"z{wbits}.zip", {"model.bin.z": data}))
+    assert status == 2, text
+    assert "compressed (zlib)" in text

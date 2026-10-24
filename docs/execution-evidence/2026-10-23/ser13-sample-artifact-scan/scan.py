@@ -9,11 +9,16 @@ Every file in the asset, and in every archive nested inside it, gets its own ver
   dangerous  any global picklescan classifies as dangerous;
   incomplete the file could not be read to the end by any recorded method.
 Content decides, not the file name: picklescan reads every file's bytes, and a file is pickle
-content if its extension says so or if parsing it yields globals that are well-formed Python
-identifiers (this finds protocol 0/1 pickles under any name). Every zip and tar, PyTorch zips
-included, is extracted with member-path, link and duplicate-name checks and its members are queued,
-so archives inside archives are reached; a pickle stream in front of an archive is judged too.
-gzip, bzip2, xz, zstd, lz4, zlib, 7z and rar content is not decompressed and is incomplete. A file
+content if its extension says so, or if parsing it yields any global that is dangerous or a
+well-formed Python identifier (this finds protocol 0/1 pickles under any name). Every zip and tar,
+PyTorch zips included, is extracted with member-path, link and duplicate-name checks and its
+members are queued, so archives inside archives are reached; each archive unpacks into a fresh
+directory of its own, so no archive can write over a member queued for scanning, and members are
+reported as `outer!/member`; a pickle stream in front of an archive is judged too. Object-dtype
+.npy files (also inside .npz) have the pickle behind their NumPy header scanned. Any pickle that
+references torch.storage._load_from_bytes goes through the restricted load so its payloads are
+captured. gzip, bzip2, xz, zstd, lz4, zlib (any window size), 7z and rar content is not
+decompressed and is incomplete. A file
 that cannot be read as a pickle to the end, or that picklescan itself fails on, is incomplete,
 never clean. Pickles that interleave raw numpy bytes with instructions (joblib) get a restricted
 load when picklescan stops early: joblib's own reader runs with find_class replaced so that only
@@ -40,6 +45,7 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import zlib
 import zipfile
 from importlib.metadata import version
 
@@ -155,7 +161,41 @@ IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
 # Formats a loader could decompress before unpickling; their contents are not scanned here.
 OPAQUE = {b"\x1f\x8b": "gzip", b"BZh": "bzip2", b"\xfd7zXZ\x00": "xz", b"\x28\xb5\x2f\xfd": "zstd",
           b"\x04\x22\x4d\x18": "lz4", b"7z\xbc\xaf\x27\x1c": "7z", b"Rar!\x1a\x07": "rar",
-          b"\x78\x01": "zlib", b"\x78\x5e": "zlib", b"\x78\x9c": "zlib", b"\x78\xda": "zlib"}
+          }
+
+
+def opaque_format(data: bytes) -> str | None:
+    """Name the compression or container format a loader could decode before unpickling, if any."""
+    for magic, fmt in OPAQUE.items():
+        if data.startswith(magic):
+            return fmt
+    # zlib (RFC 1950), any window size: CM=8, CINFO<=7, header checksum, and a trial decompress, so
+    # tensor bytes that happen to pass the 2-byte checksum are not mistaken for zlib.
+    if len(data) >= 2 and data[0] & 0x0F == 8 and data[0] >> 4 <= 7 and (data[0] << 8 | data[1]) % 31 == 0:
+        try:
+            if zlib.decompressobj().decompress(data[:65536], 64):
+                return "zlib"
+        except zlib.error:
+            pass
+    return None
+
+
+NPY_MAGIC = b"\x93NUMPY"
+
+
+def npy_object_payload(data: bytes) -> bytes | None:
+    """For a .npy file of object dtype, the pickle stream after its header; None for any other .npy."""
+    if not data.startswith(NPY_MAGIC) or len(data) < 10:
+        return None
+    major = data[6]
+    if major == 1:
+        hlen, start = int.from_bytes(data[8:10], "little"), 10
+    else:
+        hlen, start = int.from_bytes(data[8:12], "little"), 12
+    header = data[start:start + hlen].decode("latin-1", "replace")
+    if "'O'" not in header and "'|O'" not in header and '"|O"' not in header:
+        return None
+    return data[start + hlen:]
 
 
 def classify(raw: set[tuple[str, str]]):
@@ -229,10 +269,13 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
     nested_dir.mkdir()
     queue = collections.deque(safe_extract(asset, root))
     results = []
+    # every extraction root, with the label its members are reported under; nested archives get a
+    # fresh directory of their own, so no archive can write over a member queued for scanning
+    bases = [(root.resolve(), ""), (nested_dir.resolve(), "<nested>/")]
 
     def rel(p: pathlib.Path) -> str:
         p = p.resolve()
-        for base, label in ((root.resolve(), ""), (nested_dir.resolve(), "<nested>/")):
+        for base, label in sorted(bases, key=lambda b: len(str(b[0])), reverse=True):
             if p.is_relative_to(base):
                 return label + p.relative_to(base).as_posix()
         raise AssertionError("path outside the scan root")
@@ -249,23 +292,30 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
         # it yields globals that are well-formed Python identifiers. Running code from a pickle needs
         # at least one global, so this catches dangerous pickles under any name and any protocol;
         # tensor bytes (which may start with 0x80 by chance) do not parse into identifiers.
-        is_pickle = (hinted and not (is_zip or is_tar)) or (
-            bool(globs) and all(IDENT.match(m) and IDENT.match(n) for m, n, _ in globs))
+        npy_payload = npy_object_payload(data)
+        if npy_payload is not None:
+            # an object-dtype .npy (also inside an .npz) is a pickle stream behind the NumPy header
+            data = npy_payload
+            ps_ok, globs = picklescan_globals(data, rel(f))
+        is_pickle = (hinted and not (is_zip or is_tar)) or npy_payload is not None or any(
+            s == SafetyLevel.Dangerous.value or (IDENT.match(m) and IDENT.match(n)) for m, n, s in globs)
         if is_zip or is_tar:
             # Every archive is unpacked, PyTorch zips included, so each member gets its own verdict.
             # A pickle stream in front of an archive (a polyglot) is judged as well.
-            members = safe_extract(f, f.with_name(f.name + ".x"))
+            dest = work / "a" / str(len(bases))
+            dest.mkdir(parents=True)
+            bases.append((dest.resolve(), rel(f) + "!/"))
+            members = safe_extract(f, dest)
             queue.extend(members)
             results.append({"file": rel(f), "kind": "pytorch-zip" if ext in PYTORCH_EXT else "archive",
                             "verdict": "extracted", "detail": f"{len(members)} members queued"})
             if not is_pickle:
                 continue
         if not is_pickle:
-            for magic, fmt in OPAQUE.items():
-                if data.startswith(magic):
-                    results.append({"file": rel(f), "kind": f"compressed ({fmt})", "verdict": "incomplete",
-                                    "methods": ["not decompressed: contents unscanned"], "globals": []})
-                    break
+            fmt = opaque_format(data)
+            if fmt is not None:
+                results.append({"file": rel(f), "kind": f"compressed ({fmt})", "verdict": "incomplete",
+                                "methods": ["not decompressed: contents unscanned"], "globals": []})
             continue
         methods = ["picklescan 1.0.5 (bytes)" if ps_ok else "picklescan 1.0.5 (bytes): parser error"]
         if f.parent == nested_dir or (ext in PYTORCH_EXT and not is_zip):
@@ -273,9 +323,11 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
             # magic, protocol, sys_info, object, storage keys; raw storage bytes follow
             complete = ps_ok and reads_to_end(data, max_pickles=5)
         else:
-            kind = "pickle+archive" if (is_zip or is_tar) else ("joblib" if ext == ".joblib" else "pickle")
+            kind = ("pickle+archive" if (is_zip or is_tar) else "npy-object" if npy_payload is not None
+                    else "joblib" if ext == ".joblib" else "pickle")
             complete = ps_ok and not (is_zip or is_tar) and reads_to_end(data)
-        if not complete and kind in ("pickle", "joblib"):
+        embeds_torch = any((m, n) == ("torch.storage", "_load_from_bytes") for m, n, _ in globs)
+        if kind in ("pickle", "joblib") and (not complete or embeds_torch):
             # joblib (under any name) interleaves raw numpy bytes with pickle instructions
             parsed, raw, payloads = restricted_inventory(f, nested_dir)
             methods.append("restricted load (joblib 1.6.0, numpy 2.5.4)")
@@ -284,7 +336,7 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
             if not parsed:
                 raw |= {(m, n) for m, n, _ in globs}
             globs = classify(raw)
-            complete = parsed
+            complete = parsed if not complete else complete and parsed
             queue.extend(payloads)
         dangerous = [g for g in globs if g[2] == SafetyLevel.Dangerous.value]
         verdict = "dangerous" if dangerous else ("clean" if complete else "incomplete")

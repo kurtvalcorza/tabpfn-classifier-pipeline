@@ -207,9 +207,9 @@ The two joblib files interleave raw numpy bytes with pickle instructions, so pic
 |---|---|---|
 | `model.tabpfn_fit` | archive | extracted |
 | `model.ckpt` | pytorch-zip | extracted |
-| `model.tabpfn_fit.x/fitted_attrs.joblib` | joblib | clean |
-| `model.tabpfn_fit.x/executor_state.joblib` | joblib | clean |
-| `model.ckpt.x/archive/data.pkl` | pickle | clean |
+| `model.tabpfn_fit!/fitted_attrs.joblib` | joblib | clean |
+| `model.tabpfn_fit!/executor_state.joblib` | joblib | clean |
+| `model.ckpt!/archive/data.pkl` | pickle | clean |
 
 - **Result:** 3 pickle files; clean=3 dangerous=0 incomplete=0; `scan_status=0`. Dangerous globals: none.
 - **Globals (distinct, all files):** 43, by top-level package: tabpfn (28), numpy (5), sklearn (5), torch (2), builtins (1), collections (1), joblib (1). The per-file lists with picklescan's
@@ -217,7 +217,9 @@ The two joblib files interleave raw numpy bytes with pickle instructions, so pic
 - **Evidence:** `docs/execution-evidence/2026-10-23/ser13-sample-artifact-scan/` holds `scan-report.txt` exactly as `scan.py`
   wrote it (it records only paths inside the asset), `scan.py`, and `test_scan.py`, its regression tests (dangerous globals
   behind joblib buffers or beside joblib files, protocol-0 pickles under other names, pickle/zip polyglots, every PyTorch zip
-  member, compressed and truncated pickles, nested zip and tar archives, duplicate, escaping and malformed members).
+  member, object-dtype .npy files, torch payloads embedded in complete pickles, compressed (including zlib of any
+  window size) and truncated pickles, nested zip and tar archives that try to overwrite queued members, duplicate,
+  escaping and malformed members).
   `scan.py` exits 0 clean, 1 dangerous, 2 incomplete, 3 could not scan.
 
 ### Local lock-only drives (not clean-runtime evidence)
