@@ -14,11 +14,13 @@ kurtvalcorza/tabpfn-classifier-finetuner and kurtvalcorza/tabpfn-regressor-finet
 |---|---|
 | `artifact_manifest.json` | `schemaVersion` 2, `bundleFormat` `tabpfn-dimer-classifier-v2` or `tabpfn-dimer-regressor-v2` (by `taskType`), `fittedEstimator` `model.tabpfn_fit`, `foundationCheckpoint` = `modelPath` = `model.safetensors`, `payloadFiles` `["model.safetensors", "model.tabpfn_fit"]`, `foundationCheckpointSha256` / `foundationCheckpointBytes` (that file's digest and size), `fittedEstimatorSha256`, and the task fields (target, features, classes or target statistics). |
 | `model.safetensors` | The network weights in tabpfn 8.1.0's own safetensors layout: the state dict as tensors, every other checkpoint field as sorted JSON header metadata, a `dimer_conversion` provenance field, a sorted header (byte-reproducible). tabpfn opens it with `safetensors.safe_open`; no `torch.load`. |
-| `model.tabpfn_fit` | tabpfn's fitted-estimator archive (unchanged): `init_params.json` plus joblib-pickled fitted state, which can carry code. Its `model_path` is rewritten at load time to `model.safetensors`. |
+| `model.tabpfn_fit` | tabpfn's fitted-estimator archive (unchanged): `init_params.json` plus joblib-pickled fitted state. Its `model_path` is rewritten at load time to `model.safetensors`. **Code-capable (ARTIFACT_SPEC SER9):** reloading it unpickles `fitted_attrs.joblib` and `executor_state.joblib` with joblib; for the regressor that state includes torch storages, which torch rebuilds with `torch.load(BytesIO, weights_only=False)`. It is trusted only as far as the bundle digest that pins it: `fittedEstimatorSha256` in the manifest, `artifacts.modelArtifact.sha256` in a worker's `result.json`, and for a pinned sample `SAMPLE_ARTIFACT_SHA256` / `SAMPLE_ARTIFACT_FITTED_SHA256`. Verify that digest against a value from a trusted producer before loading. tabpfn 8.1.0 offers no non-pickle format for this state. |
 
 - A **pretrained** (zero-shot) v2 bundle is bound to the pinned conversion of the base checkpoint (`CONVERTED_SHA256`). A
-  fine-tuned bundle carries the fine-tuned weights; the worker's `result.json` names them in `artifacts.modelArtifact`
-  (with `sha256`) and `artifacts.foundationCheckpoint`.
+  fine-tuned bundle carries the fine-tuned weights. The worker's `result.json` keeps `artifacts.modelArtifact` = `model.tabpfn_fit`
+  (its meaning on main, now with `sha256`) and names the weights in the new `artifacts.modelWeights` (`sha256`, `sizeBytes`)
+  and in `artifacts.foundationCheckpoint`. In GPU burst mode `GPU_BURST_MODEL_KEY` still holds the fitted archive; the
+  weights (`model.ckpt` before) are published beside it as `model.safetensors`.
 - A worker reads the `.ckpt` that tabpfn wrote (`save_tabpfn_model`) once with `torch.load(weights_only=True)`, converts
   it, deletes it and every training checkpoint pickle, and fails the run if any `.ckpt` / `.pt` / `.pth` / `.bin` /
   `.pkl` file is left in its output.
