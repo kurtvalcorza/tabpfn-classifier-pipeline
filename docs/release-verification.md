@@ -154,7 +154,7 @@ validation rows (`one_row_resolution` 0.0111), `max_abs_probability_change` 0.10
 | `tabpfn_classifier_colab_197d45b_colab-cli-t4_activity_run_summary.json` | `9655dc7351df3e0bdec272ce7647b477e1ce8f5862a47cea4acf0fadf207d468` | unchanged (no local path) |
 | `tabpfn_classifier_colab_197d45b_colab-cli-t4_activity_run_copy.ipynb` | `1d36ec2ecbff48c3991f0a58a7a2da2e243093a20f1a12d59e595d6dc5d08d47` | unchanged (no local path) |
 
-**Hosted default-path run of blob `e705db6eb176` (2026-10-23, `9e69f88`; the current blob).** Colab CLI `colab exec -f`
+**Hosted default-path run of blob `e705db6eb176` (2026-10-23, `9e69f88`; the current blob until `057ab9d`, now history).** Colab CLI `colab exec -f`
 (a scripted run, not a browser Run all) on a fresh Colab Tesla T4, default path of `tutorials/tabpfn_classifier_colab.ipynb`
 at `9e69f88`, executed as committed, started 2026-10-23T08:53:20Z, wall 142.0 s, exit 0, sequential, input unchanged, 14/14
 code cells, 0 errors, verdict PASS. Evidence: `docs/execution-evidence/2026-10-23-9e69f88/`. Printed: majority-class baseline
@@ -171,7 +171,7 @@ paths were replaced by `<local-run-dir>` before the first commit:
 | `tabpfn_classifier_colab_9e69f88_colab-cli-t4_exec.log` | `c305728676a76dbc4a888cdb4ebb0f7424fab8e3513e86d26b8da0f7425d53a2` | `1f0b18e82f6338d9b65de157eedebd511e1d7c6e8ffb69eb438322eae48d4de7` (2 replacements) |
 | `tabpfn_classifier_colab_9e69f88_colab-cli-t4_run_summary.json` | `3648cc0fd260d98aba47625f67238fe72ab109058b88cbf3c66b48f25c0b1a5e` | unchanged (no local path) |
 
-**Optional-activity run of blob `e705db6eb176` (2026-10-23, `9e69f88`, `RUN_ACTIVITY = True`; the current blob).** A run copy
+**Optional-activity run of blob `e705db6eb176` (2026-10-23, `9e69f88`, `RUN_ACTIVITY = True`; history).** A run copy
 of committed blob `e705db6e` with one override, `RUN_ACTIVITY = False` → `True` (run copy blob `9cb5e29298ac`, SHA-256
 `e9d59aef2f2a891f18ba616d5d97b9f48e34ae75e66c224225b7385ee22564ab`; it differs from the committed blob only in that assignment
 literal and is committed beside the evidence as `…_activity_run_copy.ipynb`), run by Colab CLI `colab exec -f` (scripted, not a
@@ -217,7 +217,7 @@ clean Colab record, are both still required before either notebook is marked rel
 
 ## Current status
 
-**Current status (2026-10-23): Candidate.** The current E2E notebook blob is `e705db6e` (`tutorials/tabpfn_classifier_colab.ipynb`, regenerated from code commit `c6e880b` and recorded at commit `9e69f88` on `fix/refusal-display`: a refused user input — the BYOD table, Section 9 rows, your own Section 10 artifact ZIP or rows — is shown as one `Refused: <file>: <reason>` line with no traceback, names the uploaded file rather than `train.csv`, and Run all stops at that cell; NOTEBOOK_SPEC 3.0 DAT19/DAT20). **Default path covered:** hosted Colab T4 run at `9e69f88` on 2026-10-23 (PASS, 14/14 code cells, 0 errors). **Optional activity covered:** a `RUN_ACTIVITY = True` run copy of the same blob at `9e69f88` on 2026-10-23 (PASS, 14/14 code cells, 0 errors). Both records are under *Recorded executions*. The `197d45b` default-path and optional-activity records cover the previous blob `7d8051f7` and are history, as is the earlier `fcfa6ff` record of blob `d766d7b7` (REL14). The notebook stays **Candidate** pending only these two:
+**Current status (2026-10-24): Candidate.** The current E2E notebook blob is `41dc2a68` (`tutorials/tabpfn_classifier_colab.ipynb`, regenerated from code commit `057ab9d` on `fix/torch-weights-only-guard`: the carried package refuses to load a TabPFN checkpoint when torch is older than 2.6 or `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD` is set, because tabpfn 8.1.0 loads with `weights_only=None`). It has no recorded hosted run until the orchestrator records one (REL14). The `9e69f88` default-path and optional-activity records (under *Recorded executions*) cover the previous blob `e705db6e` and are history, as are the `197d45b` records of blob `7d8051f7` and the earlier `fcfa6ff` record of blob `d766d7b7`. The notebook stays **Candidate** until a hosted default-path run and an optional-activity run (the owner's 2026-10-22 ruling) of the current blob and these two are recorded for it:
 
 - **REL12:** a BYOD run in which one representative input is accepted through the downstream stages and one incompatible input is refused;
 - **REL2:** a browser run of the interactive journeys (BYOD upload dialog, optional-activity toggle, own-artifact ZIP); the scripted CLI runs count for the default path and the activity only.
