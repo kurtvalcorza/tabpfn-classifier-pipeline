@@ -60,7 +60,7 @@ ENVIRONMENT = {
 RUNTIME_PREREQ = (
     "- **Runtime:** a fresh **Linux x86_64** runtime — Google Colab (CPU is enough for the default sample; a T4 GPU is used automatically when present), Kaggle or a Linux Jupyter kernel. The kernel's own Python version does not matter: the notebook installs nothing into it, and runs every stage with CPython 3.12.12 in an isolated environment built from {n_locked} hash-locked packages (`tabpfn` 8.1.0, `torch` 2.11.0 with its CUDA libraries, `numpy` 2.5.3, `pandas` 2.3.2, `scikit-learn` 1.9.0). About 0.3 GB of disk is needed for the checkpoint and about 8 GB for the isolated environment."
 )
-LICENCE_PREREQ = "- **Licence:** the TabPFN-3 weights are non-commercial (`tabpfn-3-license-v1.0`): testing, evaluation and internal benchmarking only. A bundle carries a byte copy of the checkpoint, so the same terms travel with it. Clear the licence before any production use. No credentials are needed: `Prior-Labs/tabpfn_3` is public and not access-gated."
+LICENCE_PREREQ = "- **Licence:** the TabPFN-3 weights are non-commercial (`tabpfn-3-license-v1.0`): testing, evaluation and internal benchmarking only. A bundle carries the weights (as `model.safetensors`), so the same terms travel with it. Clear the licence before any production use. No credentials are needed: `Prior-Labs/tabpfn_3` is public and not access-gated."
 
 TEMPLATE = {
     **ENVIRONMENT,
