@@ -14,8 +14,9 @@ rebuilders, numpy.dtype, joblib's NumpyArrayWrapper, _codecs.encode and bytearra
 run; every other global is an inert stub). find_class sees the true name of every global a stream
 resolves, memo aliases included, and the stubs' names are classified with picklescan's own tables.
 It reads consecutive streams twice, with a fresh memo per stream (separate pickle.load calls) and with
-one memo shared across them (one Unpickler), and resumes right after a STOP inside a frame, so no
-stream behind a frame is skipped. In a legacy torch checkpoint the bytes after its five pickles are
+one memo shared across them (one Unpickler). After a STOP inside a frame it follows both
+continuations, right after the STOP (a loader that reads ahead) and at the frame's end (one that reads
+the whole frame); the globals of every path are judged together, and every path must read to the end. In a legacy torch checkpoint the bytes after its five pickles are
 read as further streams while they parse, and the rest must be exactly the raw storages its keys
 describe; anything else is incomplete.
 A file is pickle content if its extension says so, it is an object-dtype .npy, or either reader
@@ -30,9 +31,11 @@ successive numpy.load calls would read them: each header is parsed and its dtype
 (dtype.hasobject), as numpy.load does; any object record makes the file pickle content, and a record
 whose header or extent cannot be parsed makes it incomplete (object records before it are still
 judged, so a dangerous one wins). When an object record's pickle stops inside a FRAME, the next record
-is looked for right after its STOP and then at the frame's end, as loaders with and without read-ahead
-would resume. Extension-registry opcodes (EXT1/2/4) make a file pickle content and incomplete: the
-global they name is resolved only by the loading process's copyreg registry. Payloads of
+is looked for both right after its STOP and at the frame's end, as loaders with and without read-ahead
+would resume; every record either path reaches is judged, each object record's pickle is read on its
+own, and a path that reaches no valid record makes the file incomplete. Extension-registry opcodes
+(EXT1/2/4) make a file pickle content and incomplete, also in a stream that fails to load if it began
+with a PROTO opcode: the global they name is resolved only by the loading process's copyreg registry. Payloads of
 torch.storage._load_from_bytes are captured as files and scanned like any other file, never loaded;
 a payload that cannot be rebuilt as bytes makes its file incomplete.
 gzip, bzip2, xz, LZMA-alone, zstd, lz4, zlib (any window size, recognised by its header and a bounded
@@ -229,26 +232,36 @@ NPY_MAGIC = b"\x93NUMPY"
 
 class NpyUnreadable(Exception):
     """A .npy record whose header or extent cannot be parsed (the file is then incomplete). payload holds
-    the pickle streams of the object records before it, which are still judged."""
+    the pickle streams of the object records reached, which are still judged."""
 
-    def __init__(self, message: str, payload: bytes | None = None):
+    def __init__(self, message: str, payload: list[bytes] | None = None):
         super().__init__(message)
         self.payload = payload
 
 
-def npy_object_payload(data: bytes) -> bytes | None:
+def npy_object_payloads(data: bytes) -> list[bytes] | None:
     """Walk every record of a .npy file, as successive numpy.load calls would read them, and return the
-    pickle streams behind its object-dtype records, joined; None if the file is not a .npy or holds
-    only plain records. Each header is parsed (ast.literal_eval) and its dtype resolved by NumPy
+    pickle stream behind each object-dtype record, one per record; None if the file is not a .npy or
+    holds only plain records. Each header is parsed (ast.literal_eval) and its dtype resolved by NumPy
     itself, as numpy.load does, so every spelling of an object dtype ('O', '|O8', 'object',
-    structured) counts. A record whose header or extent cannot be parsed raises NpyUnreadable, carrying
-    the object payloads read before it; an
-    object record whose pickle cannot be delimited carries the rest of the file, so it is never clean."""
+    structured) counts. After an object record whose pickle stops inside a FRAME, the next record is
+    looked for both right after the STOP and at the frame's end, and every path is followed. A record
+    whose header or extent cannot be parsed raises NpyUnreadable, carrying the object payloads read on
+    every path; an object record whose pickle cannot be delimited carries the rest of the file, so it
+    is never clean."""
     if not data.startswith(NPY_MAGIC):
         return None
     payloads: list[bytes] = []
-    off = 0
-    while off < len(data):
+    errors: list[str] = []
+    todo, done = [0], set()
+    while todo:
+        off = todo.pop()
+        if off in done or off == len(data):
+            continue
+        done.add(off)
+        if len(done) > 10000:
+            errors.append("too many record paths")
+            break
         try:
             if not data.startswith(NPY_MAGIC, off):
                 raise ValueError("no NumPy magic")
@@ -270,9 +283,10 @@ def npy_object_payload(data: bytes) -> bytes | None:
                 if end > len(data):
                     raise ValueError("array data runs past the end of the file")
         except Exception as exc:
-            raise NpyUnreadable(f"record at offset {off}: {exc}", b"".join(payloads) or None) from exc
+            errors.append(f"record at offset {off}: {exc}")
+            continue
         if not dtype.hasobject:
-            off = end
+            todo.append(end)
             continue
         # numpy.load unpickles one stream behind an object header; the next record starts after it
         bio = io.BytesIO(data)
@@ -284,15 +298,17 @@ def npy_object_payload(data: bytes) -> bytes | None:
                     frame_end = pos + 9 + arg
         except Exception:
             payloads.append(data[body:])
-            break
-        payloads.append(data[body:bio.tell()])
-        off = bio.tell()
+            continue
+        stop = bio.tell()
+        payloads.append(data[body:stop])
+        todo.append(stop)
         # a STOP inside a FRAME: a loader with read-ahead resumes after the STOP, one without at the
-        # frame's end; take the one that holds the next record (or the end of the file)
-        if frame_end is not None and off < frame_end <= len(data) and not (
-                off == len(data) or data.startswith(NPY_MAGIC, off)):
-            off = frame_end
-    return b"".join(payloads) if payloads else None
+        # frame's end; both are followed
+        if frame_end is not None and stop < frame_end <= len(data):
+            todo.append(frame_end)
+    if errors:
+        raise NpyUnreadable("; ".join(errors), payloads or None)
+    return payloads or None
 
 
 def classify(raw: set[tuple[str, str]]):
@@ -332,7 +348,7 @@ def restricted_inventory(data: bytes, nested_dir: pathlib.Path, legacy: bool = F
     Returns (parsed_to_end, raw globals, payloads, unresolved, extension codes)."""
     seen: set[tuple[str, str]] = set()
     storages: dict[str, tuple[str, object]] = {}
-    extensions: set[int] = set()   # EXT1/2/4 codes of streams that loaded to their STOP
+    extensions: set[int] = set()   # EXT1/2/4 codes (of loaded streams, or failed ones that began with PROTO)
     pending: list[int] = []
     payloads: list[pathlib.Path] = []
     unresolved: list[str] = []
@@ -404,52 +420,56 @@ def restricted_inventory(data: bytes, nested_dir: pathlib.Path, legacy: bool = F
 
     def read(shared_memo: bool) -> bool:
         """One pass over the streams: shared_memo as one Unpickler calling load() repeatedly, otherwise a
-        fresh Unpickler (and memo) per stream, as separate pickle.load calls."""
-        fh = io.BytesIO(data)
-        unpickler = None
-
-        def load_one():
-            nonlocal unpickler
-            if unpickler is None or not shared_memo:
-                unpickler = Restricted("<bytes>", fh, ensure_native_byte_order=True, mmap_mode=None)
-            pending.clear()
-            obj = unpickler.load()
-            extensions.update(pending)
-            frame = unpickler._unframer.current_frame
-            if frame is not None:  # a STOP inside a frame: the next stream starts right after it
-                fh.seek(fh.tell() - (len(frame.getvalue()) - frame.tell()))
-            return obj
-
-        if not legacy:
-            count = 0
-            try:
-                while fh.tell() < len(data):
-                    load_one()
-                    count += 1
-            except Exception:
+        fresh memo per stream, as separate pickle.load calls. After a STOP inside a frame both
+        continuations are followed: right after the STOP and at the frame's end. True only if every
+        path reads to the end (for a legacy checkpoint: its five pickles, further streams, then exactly
+        its raw storages)."""
+        ok, todo, done = True, [(0, {}, 0, None)], set()
+        while todo:
+            pos, memo, count, keys = todo.pop()
+            if (pos, min(count, 5)) in done:
+                continue
+            done.add((pos, min(count, 5)))
+            if len(done) > 10000:
                 return False
-            return count > 0
-        loaded = []
-        try:
-            while len(loaded) < 5:  # magic, protocol, sys_info, object, storage keys
-                loaded.append(load_one())
-        except Exception:
-            return False
-        while fh.tell() < len(data):  # further streams, as repeated pickle.load would read them
-            start, before = fh.tell(), set(seen)
+            if pos == len(data):
+                ok = ok and count > 0 and (not legacy or (count >= 5 and legacy_tail_is_storages(b"", keys, storages)))
+                continue
+            fh = io.BytesIO(data)
+            fh.seek(pos)
+            unpickler = Restricted("<bytes>", fh, ensure_native_byte_order=True, mmap_mode=None)
+            if shared_memo:
+                unpickler.memo = dict(memo)
+            pending.clear()
+            before = set(seen)
             try:
-                load_one()
+                obj = unpickler.load()
             except Exception:
-                # not a stream: the raw storages start here; globals their bytes happen to spell are
-                # dropped unless dangerous
-                junk = seen - before
-                seen.clear()
-                seen.update(before)
-                if junk:
-                    seen.update((m, n) for m, n, s in classify(junk) if s == SafetyLevel.Dangerous.value)
-                fh.seek(start)
-                break
-        return legacy_tail_is_storages(data[fh.tell():], loaded[4], storages)
+                if pending and data[pos:pos + 1] == b"\x80":  # a failed stream that announced a protocol
+                    extensions.update(pending)
+                if legacy and count >= 5:
+                    # not a stream: the raw storages start here; globals their bytes happen to spell are
+                    # dropped unless dangerous
+                    junk = seen - before
+                    seen.clear()
+                    seen.update(before)
+                    if junk:
+                        seen.update((m, n) for m, n, s in classify(junk) if s == SafetyLevel.Dangerous.value)
+                    ok = ok and legacy_tail_is_storages(data[pos:], keys, storages)
+                else:
+                    ok = False
+                continue
+            extensions.update(pending)
+            if count == 4:  # the legacy storage keys
+                keys = obj
+            following = [fh.tell()]
+            frame = unpickler._unframer.current_frame
+            rest = 0 if frame is None else len(frame.getvalue()) - frame.tell()
+            if rest:  # a STOP inside a frame: also resume right after the STOP
+                following.append(fh.tell() - rest)
+            for nxt in following:
+                todo.append((nxt, unpickler.memo if shared_memo else {}, count + 1, keys))
+        return ok
 
     # both memo behaviours a standard loader can have; the file is read to the end only if both read it
     parsed = read(shared_memo=False) & read(shared_memo=True)
@@ -507,31 +527,40 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
                                 "verdict": "extracted", "detail": f"{len(members)} members queued"})
         npy_error = None
         try:
-            npy_payload = npy_object_payload(data)
+            npy_payloads = npy_object_payloads(data)
         except NpyUnreadable as exc:
             if exc.payload is None:
                 results.append({"file": rel(f), "kind": "npy", "verdict": "incomplete",
                                 "methods": [f"NumPy header unreadable: {exc}"], "globals": []})
                 continue
-            npy_payload, npy_error = exc.payload, str(exc)
-        if npy_payload is not None:
-            # an object-dtype .npy (also inside an .npz) is a pickle stream behind the NumPy header
-            data = npy_payload
+            npy_payloads, npy_error = exc.payload, str(exc)
+        # an object-dtype .npy (also inside an .npz) holds a pickle stream behind each object header; each
+        # is read on its own, as each numpy.load call unpickles one
+        streams = npy_payloads if npy_payloads is not None else [data]
         legacy = f.parent == nested_dir or (ext in PYTORCH_EXT and not is_zip)
         # Content decides, not the name. picklescan reads the bytes, and the restricted load reads
         # them too: its find_class sees the true name of every global the stream resolves (picklescan
         # 1.0.5 can misread memo aliases), and it captures torch payloads. A file is pickle content if
         # its name says so, it is an object .npy, or either reader finds a global that is dangerous
         # or a well-formed Python identifier; tensor bytes do not parse into identifiers.
-        ps_ok, ps_globs = picklescan_globals(data, rel(f))
-        parsed, raw, payloads, unresolved, extensions = restricted_inventory(data, nested_dir, legacy)
+        ps_ok, ps_globs, parsed, raw, payloads, unresolved, extensions = True, [], True, set(), [], [], set()
+        for stream in streams:
+            ok, found = picklescan_globals(stream, rel(f))
+            p_ok, p_raw, p_payloads, p_unresolved, p_ext = restricted_inventory(stream, nested_dir, legacy)
+            ps_ok, parsed = ps_ok and ok, parsed and p_ok
+            ps_globs += found
+            raw |= p_raw
+            payloads += [x for x in p_payloads if x not in payloads]
+            unresolved += p_unresolved
+            extensions.update(p_ext)
+        extensions = sorted(extensions)
         ps_raw = {(m, n) for m, n, _ in ps_globs}
         ps_dangerous = {(m, n) for m, n, s in ps_globs if s == SafetyLevel.Dangerous.value}
         # A restricted load that read the whole file saw every resolved global; picklescan's list is then
         # kept only for its dangerous findings (it loses its place after raw buffers and misreads memo
         # aliases). Otherwise both lists are kept.
         globs = classify(raw | (ps_dangerous if parsed else ps_raw))
-        is_pickle = hinted or npy_payload is not None or bool(extensions) or any(
+        is_pickle = hinted or npy_payloads is not None or bool(extensions) or any(
             s == SafetyLevel.Dangerous.value or (IDENT.match(m) and IDENT.match(n)) for m, n, s in globs)
         if not is_pickle:
             # also in front of an archive; a tar that tarfile itself decompressed was unpacked and scanned
@@ -547,9 +576,10 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
             # magic, protocol, sys_info, object, storage keys; raw storage bytes follow
             complete = ps_ok and parsed and reads_to_end(data, max_pickles=5)
         else:
-            kind = ("pickle+archive" if (is_zip or is_tar) else "npy-object" if npy_payload is not None
+            kind = ("pickle+archive" if (is_zip or is_tar) else "npy-object" if npy_payloads is not None
                     else "joblib" if ext == ".joblib" else "pickle")
-            complete = not (is_zip or is_tar) and parsed and (reads_to_end(data) or kind in ("joblib", "pickle"))
+            complete = not (is_zip or is_tar) and parsed and (all(reads_to_end(s) for s in streams)
+                                                              or kind in ("joblib", "pickle"))
         if npy_error:
             methods.append(f"NumPy header unreadable: {npy_error}")
             complete = False

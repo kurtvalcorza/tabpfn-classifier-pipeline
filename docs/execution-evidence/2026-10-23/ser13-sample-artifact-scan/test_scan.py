@@ -687,7 +687,8 @@ def _framed_object_record(body: bytes) -> bytes:
 
 
 @pytest.mark.parametrize("second,expected", [
-    pytest.param(lambda: _npy_records(np.arange(3)), 0, id="benign-second-record"),
+    # round 5: the bytes right after the STOP are no record, and every path must read to the end
+    pytest.param(lambda: _npy_records(np.arange(3)), 2, id="benign-second-record"),
     pytest.param(lambda: _npy("'|O'", NT_SYSTEM), 1, id="dangerous-second-record"),
 ])
 def test_record_after_a_stop_inside_a_frame_is_reached(tmp_path, second, expected):
@@ -762,3 +763,56 @@ def test_gzipped_tar_is_unpacked_and_scanned_not_opaque(tmp_path):
     status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"bundle.tgz": tgz.read_bytes()}))
     assert status == 0, text
     assert "bundle.tgz!/m.pkl [pickle] CLEAN" in text
+
+
+# --- Codex round 5 on scan.py v11: every frame continuation and every NumPy record path is followed --------
+
+PADDED_FRAME = _frame(b"N." + b"PADDINGPADDING")   # STOP, then non-pickle bytes up to the frame's end
+
+
+@pytest.mark.parametrize("member", ["blob.xyz", "model.pkl"])
+def test_stream_after_the_end_of_a_padded_frame_is_read(tmp_path, member):
+    # Codex 4370950731: the reader resumed only right after the STOP, never at the frame's end
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {member: PADDED_FRAME + NT_SYSTEM_P4}))
+    assert status == 1, text
+    assert "nt.system" in text
+
+
+def test_padded_frame_before_a_clean_stream_is_incomplete(tmp_path):
+    # the bytes right after the STOP are not a stream, so that path cannot be read to the end
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.pkl": PADDED_FRAME + P4 + b"N."}))
+    assert status == 2, text
+
+
+def test_both_frame_continuations_that_read_to_the_end_are_clean(tmp_path):
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.pkl": _frame(b"N." + P4 + b"N.")}))
+    assert status == 0, text
+
+
+def test_extension_code_in_a_stream_that_fails_to_load_is_kept(tmp_path):
+    # Codex 4370955724: EXT1 42, EMPTY_TUPLE, REDUCE, then an invalid opcode before any STOP
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"notes.txt": b"\x80\x02\x82*)R\xff"}))
+    assert status == 2, text
+    assert "notes.txt [pickle] INCOMPLETE" in text and "extension-registry opcode (code 42)" in text
+
+
+def test_bytes_starting_with_an_ext_opcode_without_proto_are_not_pickle(tmp_path):
+    # control: tensor bytes can start with 0x82-0x84; only a failed stream that began with PROTO counts
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"data/0": b"\x82*)R\xff" + bytes(64)}))
+    assert status == 0, text
+
+
+def _npy_u1_header(count: int) -> bytes:
+    return _npy_records(np.zeros(count, dtype=np.uint8))[:-count] if count else _npy_records(np.zeros(0, np.uint8))
+
+
+@pytest.mark.parametrize("second,expected", [
+    pytest.param(lambda: _npy("'|O'", NT_SYSTEM), 1, id="dangerous-at-frame-end"),
+    pytest.param(lambda: _npy_records(np.arange(3)), 0, id="benign-at-frame-end"),
+])
+def test_records_at_both_resume_points_are_judged(tmp_path, second, expected):
+    # Codex 4370955723: a benign header right after the STOP whose body spans the record at the frame's end
+    tail = second()
+    data = _framed_object_record(b"N." + _npy_u1_header(len(tail))) + tail
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"arrays.npy": data}))
+    assert status == expected, text
