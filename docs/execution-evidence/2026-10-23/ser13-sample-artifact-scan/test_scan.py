@@ -392,3 +392,82 @@ def test_persistent_ids_in_torch_pickles_parse_to_the_end(tmp_path):
     status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.pt": pt.getvalue()}))
     assert status == 0, text
     assert "data.pkl [pickle] CLEAN" in text
+
+
+# --- Codex round on scan.py v7: concatenated and framed streams, memo aliases, multi-record .npy ---------
+# Raw opcodes, so the fixtures are the same bytes on every platform (os.system pickles as nt.system on
+# Windows and posix.system elsewhere); nt.system is dangerous in picklescan's tables on every platform.
+
+P4 = b"\x80\x04"
+NT_SYSTEM = b"\x80\x02cnt\nsystem\nX\x0e\x00\x00\x00echo never-run\x85R."   # GLOBAL, arg, TUPLE1, REDUCE
+ALIASED = (b"\x8c\x02nt\x94\x8c\x06system\x94"   # memoize 'nt' at 0 and 'system' at 1
+           b"N0"                                  # NONE, POP: the strings are not adjacent to STACK_GLOBAL
+           b"h\x00h\x01\x93"                      # BINGET 0, BINGET 1, STACK_GLOBAL
+           b"\x8c\x0eecho never-run\x85R.")
+
+
+def _frame(body: bytes) -> bytes:
+    return P4 + b"\x95" + len(body).to_bytes(8, "little") + body
+
+
+@pytest.mark.parametrize("stream", [
+    pytest.param(b"\x80\x02N." + NT_SYSTEM, id="clean-then-dangerous-stream"),
+    pytest.param(_frame(b"N." + NT_SYSTEM), id="both-streams-in-one-frame"),
+    pytest.param(P4 + ALIASED, id="memo-aliased-alone"),
+    pytest.param(P4 + b"N." + P4 + ALIASED, id="memo-aliased-after-clean-stream"),
+    pytest.param(_frame(b"N." + P4 + ALIASED), id="memo-aliased-in-one-frame"),
+])
+def test_later_or_aliased_dangerous_stream_is_found(tmp_path, stream):
+    # Codex P1s at scan.py:163 and :300 (not reproduced): a dangerous global in a second stream, inside
+    # one protocol-4 frame, or resolved through memo aliases
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.pkl": stream}))
+    assert status == 1, text
+    assert "model.pkl [pickle] DANGEROUS" in text and "nt.system" in text
+
+
+def _npy_records(*arrays) -> bytes:
+    buf = io.BytesIO()
+    for a in arrays:
+        np.save(buf, a, allow_pickle=False)
+    return buf.getvalue()
+
+
+def test_object_record_after_a_numeric_npy_record_is_scanned(tmp_path):
+    # Codex P1 at scan.py:227: only the first record's dtype was judged
+    data = _npy_records(np.arange(3)) + _npy("'|O'", NT_SYSTEM)
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"arrays.npy": data}))
+    assert status == 1, text
+    assert "arrays.npy [npy-object] DANGEROUS" in text
+
+
+def test_object_record_after_a_numeric_record_inside_npz_is_scanned(tmp_path):
+    npz = _zip_bytes({"arr_0.npy": _npy_records(np.arange(3.0)) + _npy("'|O'", NT_SYSTEM)})
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"data.npz": npz}))
+    assert status == 1, text
+    assert "data.npz!/arr_0.npy [npy-object] DANGEROUS" in text
+
+
+def test_record_after_an_object_record_is_walked(tmp_path):
+    clean_obj = b"\x80\x02N."
+    data = _npy_records(np.arange(3)) + _npy("'|O'", clean_obj) + _npy("'|O'", NT_SYSTEM)
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"arrays.npy": data}))
+    assert status == 1, text
+
+
+def test_numeric_multi_record_npy_is_not_pickle(tmp_path):
+    data = _npy_records(np.arange(3), np.ones((2, 2)), np.zeros(0, dtype=np.int8))
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"arrays.npy": data}))
+    assert status == 0, text
+    assert "summary: 0 pickle files" in text
+
+
+@pytest.mark.parametrize("tail", [
+    pytest.param(lambda: _npy_records(np.arange(100))[:-8], id="truncated-data"),
+    pytest.param(lambda: b"\x93NUMPY\x01\x00\xff\x00{'descr'", id="truncated-header"),
+    pytest.param(lambda: b"trailing", id="no-magic"),
+])
+def test_unparseable_later_npy_record_is_incomplete(tmp_path, tail):
+    data = _npy_records(np.arange(3)) + tail()
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"arrays.npy": data}))
+    assert status == 2, text
+    assert "arrays.npy [npy] INCOMPLETE" in text

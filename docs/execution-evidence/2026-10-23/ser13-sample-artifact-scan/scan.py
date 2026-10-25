@@ -20,10 +20,12 @@ PyTorch zips included, are extracted with member-path, link and duplicate-name c
 is both a zip and a tar is extracted both ways), and members are queued, so archives inside
 archives are reached; each nested archive unpacks into a fresh directory, so nothing can write over
 a member queued for scanning, and members are reported as `outer!/member`. A pickle stream in front
-of an archive, including the asset itself, is judged too. Object dtype is decided by parsing the
-.npy header and asking NumPy (dtype.hasobject), as numpy.load does; an unreadable header is
-incomplete. Payloads of torch.storage._load_from_bytes are captured as files and scanned like any
-other file, never loaded; a payload that cannot be rebuilt as bytes makes its file incomplete.
+of an archive, including the asset itself, is judged too. Every record of a .npy file is walked, as
+successive numpy.load calls would read them: each header is parsed and its dtype judged by NumPy
+(dtype.hasobject), as numpy.load does; any object record makes the file pickle content, and a record
+whose header or extent cannot be parsed makes it incomplete. Payloads of
+torch.storage._load_from_bytes are captured as files and scanned like any other file, never loaded;
+a payload that cannot be rebuilt as bytes makes its file incomplete.
 gzip, bzip2, xz, zstd, lz4, zlib (any window size), 7z and rar content is not decompressed and is
 incomplete. A file that cannot be read to the end by either reader is incomplete, never clean.
 Threat model and scope (frozen 2026-10-24; review findings inside it are fixed, findings outside it
@@ -54,6 +56,7 @@ import ast
 import collections
 import hashlib
 import io
+import math
 import pathlib
 import pickle
 import pickletools
@@ -209,22 +212,54 @@ class NpyUnreadable(Exception):
 
 
 def npy_object_payload(data: bytes) -> bytes | None:
-    """For a .npy whose dtype holds Python objects, the pickle stream after its header; None for any
-    other .npy. The header is parsed (ast.literal_eval) and the dtype resolved by NumPy itself, as
-    numpy.load does, so every spelling of an object dtype ('O', '|O8', 'object', structured) counts."""
+    """Walk every record of a .npy file, as successive numpy.load calls would read them, and return the
+    pickle streams behind its object-dtype records, joined; None if the file is not a .npy or holds
+    only plain records. Each header is parsed (ast.literal_eval) and its dtype resolved by NumPy
+    itself, as numpy.load does, so every spelling of an object dtype ('O', '|O8', 'object',
+    structured) counts. A record whose header or extent cannot be parsed raises NpyUnreadable; an
+    object record whose pickle cannot be delimited carries the rest of the file, so it is never clean."""
     if not data.startswith(NPY_MAGIC):
         return None
-    try:
-        major = data[6]
-        if major == 1:
-            hlen, start = int.from_bytes(data[8:10], "little"), 10
-        else:
-            hlen, start = int.from_bytes(data[8:12], "little"), 12
-        header = ast.literal_eval(data[start:start + hlen].decode("latin-1"))
-        dtype = np.dtype(header["descr"])
-    except Exception as exc:
-        raise NpyUnreadable(str(exc)) from exc
-    return data[start + hlen:] if dtype.hasobject else None
+    payloads: list[bytes] = []
+    off = 0
+    while off < len(data):
+        try:
+            if not data.startswith(NPY_MAGIC, off):
+                raise ValueError("no NumPy magic")
+            major = data[off + 6]
+            if major == 1:
+                hlen, start = int.from_bytes(data[off + 8:off + 10], "little"), off + 10
+            else:
+                hlen, start = int.from_bytes(data[off + 8:off + 12], "little"), off + 12
+            if start + hlen > len(data):
+                raise ValueError("header runs past the end of the file")
+            header = ast.literal_eval(data[start:start + hlen].decode("latin-1"))
+            dtype = np.dtype(header["descr"])
+            body = start + hlen
+            if not dtype.hasobject:
+                shape = tuple(header["shape"])
+                if not all(isinstance(n, int) and n >= 0 for n in shape):
+                    raise ValueError(f"bad shape {shape!r}")
+                end = body + dtype.itemsize * math.prod(shape)
+                if end > len(data):
+                    raise ValueError("array data runs past the end of the file")
+        except Exception as exc:
+            raise NpyUnreadable(f"record at offset {off}: {exc}") from exc
+        if not dtype.hasobject:
+            off = end
+            continue
+        # numpy.load unpickles one stream behind an object header; the next record starts after it
+        bio = io.BytesIO(data)
+        bio.seek(body)
+        try:
+            for _ in pickletools.genops(bio):
+                pass
+        except Exception:
+            payloads.append(data[body:])
+            break
+        payloads.append(data[body:bio.tell()])
+        off = bio.tell()
+    return b"".join(payloads) if payloads else None
 
 
 def classify(raw: set[tuple[str, str]]):
