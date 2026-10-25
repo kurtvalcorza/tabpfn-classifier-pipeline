@@ -16,6 +16,8 @@ jobs:
           cache-dependency-path: requirements-test.txt
       - run: pip install -r requirements-test.txt ruff==0.16.6 && pip install -e . --no-deps
       - run: python -m py_compile examples/build_synthetic_dataset.py serving/load_artifact.py
+      - name: Print the safetensors_weights.py digest the vendored copies pin
+        run: python tools/print_weights_sha256.py
       - name: Lint
         run: ruff check .
       - name: Offline tests (no tabpfn, no torch, no weights)

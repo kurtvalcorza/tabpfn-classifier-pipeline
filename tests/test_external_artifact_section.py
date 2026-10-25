@@ -32,8 +32,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
 E2E = ROOT / "tutorials" / "tabpfn_classifier_colab.ipynb"
-PINNED_URL = "https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/sample-artifact-synthetic-v1/tabpfn_classifier_artifact.zip"
-PINNED_SHA256 = "8fe248e2f9841c452316d07ee3e88e5fcde89ec458ff630954028b1c22df1054"
+PINNED_URL = "https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/sample-artifact-synthetic-v2/tabpfn_classifier_artifact.zip"
+PINNED_SHA256 = "8828df98a2db8047bc2d52313a5a173bfa499d8b780619899def268dee31b41c"
 PINNED_FITTED_SHA256 = "1f48ecaf118c834633c8c000579e3f68227cf11c9ae0b146b68509f6f3bb9af6"
 SECTION_START = "## 10. Using an artifact made elsewhere"
 SECTION_END = "## 11. Optional activity"
@@ -89,7 +89,8 @@ def test_section_pins_the_release_asset_by_url_and_digests() -> None:
     assert STAGES.SAMPLE_ARTIFACT_SHA256 == PINNED_SHA256
     assert STAGES.SAMPLE_ARTIFACT_FITTED_SHA256 == PINNED_FITTED_SHA256
     assert STAGES.SAMPLE_ARTIFACT_PRODUCER["commit"].startswith("7fce7f9")
-    assert STAGES.SAMPLE_ARTIFACT_PRODUCER["release_tag"] == STAGES.SAMPLE_ARTIFACT_TAG == "sample-artifact-synthetic-v1"
+    assert STAGES.SAMPLE_ARTIFACT_PRODUCER["release_tag"] == STAGES.SAMPLE_ARTIFACT_TAG == "sample-artifact-synthetic-v2"
+    assert "sample-artifact-synthetic-v1" in STAGES.SAMPLE_ARTIFACT_PRODUCER["reissue"]
 
 
 def test_default_path_fetches_the_pin_and_never_this_runs_export(tmp_path, monkeypatch) -> None:
@@ -163,27 +164,36 @@ class _Estimator:
         return np.tile([0.6, 0.3, 0.1], (len(X), 1))
 
 
-def _standin(tmp_path: Path, P, monkeypatch, *, features: list[str] | None = None) -> tuple[Path, str]:
-    """A three-member artifact with a stand-in fitted archive and checkpoint; the package's pinned checkpoint digest is
-    overridden (test only) to the stand-in checkpoint's, so ``validate_artifact_bundle`` runs unchanged."""
-    art = tmp_path / "standin-artifact"
+def _standin(tmp_path: Path, P, monkeypatch, *, features: list[str] | None = None, legacy: bool = False) -> tuple[Path, str]:
+    """A three-member artifact with a stand-in fitted archive and weights; the package's pinned digest for the layout
+    (``CONVERTED_SHA256`` for v2, ``WEIGHTS_SHA256`` for the deprecated v1) is overridden (test only) to the stand-in's,
+    so ``validate_artifact_bundle`` runs unchanged. ``legacy=True`` builds a v1 ``model.ckpt`` bundle."""
+    art = tmp_path / ("standin-artifact-v1" if legacy else "standin-artifact")
     art.mkdir()
+    weights_name = P.LEGACY_CHECKPOINT_NAME if legacy else P.CHECKPOINT_NAME
     with zipfile.ZipFile(art / P.FITTED_NAME, "w") as fitted:
         fitted.writestr("init_params.json", json.dumps({"model_path": "/producer/model.ckpt"}))
         fitted.writestr("padding.bin", b"\0" * 2048)
-    (art / P.CHECKPOINT_NAME).write_bytes(hashlib.sha256(b"stand-in checkpoint").digest() * 128)
-    ckpt_sha = hashlib.sha256((art / P.CHECKPOINT_NAME).read_bytes()).hexdigest()
-    monkeypatch.setattr(P, "WEIGHTS_SHA256", ckpt_sha)
+    (art / weights_name).write_bytes(hashlib.sha256(b"stand-in checkpoint").digest() * 128)
+    ckpt_sha = hashlib.sha256((art / weights_name).read_bytes()).hexdigest()
+    pinned_name = "WEIGHTS_SHA256" if legacy else "CONVERTED_SHA256"
+    monkeypatch.setattr(P, pinned_name, ckpt_sha)
+    monkeypatch.setattr(P.pipeline, pinned_name, ckpt_sha)  # pinned_checkpoint_sha256 reads the module's pin
     features = features or [f"feature_{i:02d}" for i in range(12)]
     manifest = {
-        "schemaVersion": P.ARTIFACT_SCHEMA_VERSION, "taskType": P.TASK_TYPE, "targetColumn": "target", "featureColumns": features,
-        "classes": ["class_0", "class_1", "class_2"], "fittedEstimator": P.FITTED_NAME, "foundationCheckpoint": P.CHECKPOINT_NAME,
-        "fittedEstimatorSha256": hashlib.sha256((art / P.FITTED_NAME).read_bytes()).hexdigest(), "foundationCheckpointSha256": ckpt_sha,
-        "baseModel": {"modelId": P.MODEL_ID, "revision": P.MODEL_REVISION, "file": P.WEIGHTS_FILE, "sha256": ckpt_sha}, "mode": "zero-shot-icl",
+        "taskType": P.TASK_TYPE, "targetColumn": "target", "featureColumns": features,
+        "classes": ["class_0", "class_1", "class_2"], 
+        "fittedEstimatorSha256": hashlib.sha256((art / P.FITTED_NAME).read_bytes()).hexdigest(),
+        "baseModel": {"modelId": P.MODEL_ID, "revision": P.MODEL_REVISION, "file": P.WEIGHTS_FILE, "sha256": P.WEIGHTS_SHA256}, "mode": "zero-shot-icl",
         "nEstimators": 4, "randomState": 42, "featureKinds": {c: "numeric" for c in features},
     }
+    if legacy:
+        manifest.update({"schemaVersion": P.LEGACY_ARTIFACT_SCHEMA_VERSION, "fittedEstimator": P.FITTED_NAME, "foundationCheckpoint": P.LEGACY_CHECKPOINT_NAME, "foundationCheckpointSha256": ckpt_sha})
+        monkeypatch.setattr(P.safetensors_weights, "legacy_checkpoint_to_safetensors", lambda source, destination, **kw: Path(destination).write_bytes(b"converted"))
+    else:
+        manifest.update(P.safetensors_weights.v2_manifest_fields(P.TASK_TYPE, ckpt_sha, (art / weights_name).stat().st_size))
     (art / P.ARTIFACT_MANIFEST_NAME).write_text(json.dumps(manifest), encoding="utf-8")
-    zip_path = tmp_path / "tabpfn_classifier_artifact.zip"
+    zip_path = tmp_path / ("tabpfn_classifier_artifact_v1.zip" if legacy else "tabpfn_classifier_artifact.zip")
     P.zip_artifact_bundle(art, zip_path)
     original = P.TabPFNClassifierPipeline.from_artifact.__func__
     monkeypatch.setattr(P.TabPFNClassifierPipeline, "from_artifact", classmethod(functools.partial(original, loader=lambda fitted, device: _Estimator())))
@@ -232,7 +242,8 @@ def test_section_runs_end_to_end_on_a_standin_artifact(tmp_path, monkeypatch) ->
 
 
 def test_members_are_checked_before_extraction(tmp_path, monkeypatch) -> None:
-    """A ZIP with notes.txt, or with sub/model.ckpt that flattening would let overwrite model.ckpt, is refused."""
+    """A ZIP with notes.txt, with both weights files (mixed layouts), or with sub/model.safetensors that flattening would
+    let overwrite model.safetensors, is refused."""
     P = STAGES.package(_root(tmp_path))
     good, _fitted = _standin(tmp_path, P, monkeypatch)
     assert STAGES.check_members(P, good) == sorted([P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, P.CHECKPOINT_NAME])
@@ -245,9 +256,41 @@ def test_members_are_checked_before_extraction(tmp_path, monkeypatch) -> None:
     nested = tmp_path / "nested.zip"
     shutil.copyfile(good, nested)
     with zipfile.ZipFile(nested, "a") as archive:
-        archive.writestr("sub/model.ckpt", b"evil")
-    with pytest.raises(ValueError, match=r"\['model\.ckpt'\] occur more than once"):
+        archive.writestr("sub/model.safetensors", b"evil")
+    with pytest.raises(ValueError, match=r"\['model\.safetensors'\] occur more than once"):
         STAGES.check_members(P, nested)
+    mixed = tmp_path / "mixed.zip"
+    shutil.copyfile(good, mixed)
+    with zipfile.ZipFile(mixed, "a") as archive:
+        archive.writestr("model.ckpt", b"pickle")
+    with pytest.raises(ValueError, match=r"unexpected=\['model\.ckpt'\]"):
+        STAGES.check_members(P, mixed)
+
+
+def test_v1_artifact_is_still_accepted_bound_to_the_source_checkpoint(tmp_path, monkeypatch) -> None:
+    """A deprecated v1 bundle (model.ckpt) passes the members, digest and base-model checks, bound to WEIGHTS_SHA256; a
+    v1 manifest that names model.safetensors, or a v2 one that names model.ckpt, is refused before any file is read."""
+    _cpu(monkeypatch)
+    root = _root(tmp_path)
+    P = STAGES.package(root)
+    zip_path, fitted = _standin(tmp_path, P, monkeypatch, legacy=True)
+    assert STAGES.check_members(P, zip_path) == sorted([P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, P.LEGACY_CHECKPOINT_NAME])
+    monkeypatch.setattr(STAGES, "SAMPLE_ARTIFACT_URL", zip_path.resolve().as_uri())
+    monkeypatch.setattr(STAGES, "SAMPLE_ARTIFACT_SHA256", hashlib.sha256(zip_path.read_bytes()).hexdigest())
+    monkeypatch.setattr(STAGES, "SAMPLE_ARTIFACT_FITTED_SHA256", fitted)
+    run = STAGES.Run(root, tmp_path / "outputs", tmp_path / "weights", {"source": "pinned"})
+    _quiet(STAGES.stage_external_artifact, run)
+    record = json.loads((run.state / "external_artifact.json").read_text())
+    assert "deprecated bundle format v1" in record["checkpoint_binding"] and record["manifest"]["schemaVersion"] == 1
+    run.options = {}
+    _quiet(STAGES.stage_external_reconstruct, run)
+    base = {"taskType": P.TASK_TYPE, "fittedEstimator": P.FITTED_NAME}
+    with pytest.raises(ValueError, match="mixed v1"):
+        P.safetensors_weights.check_bundle_layout({**base, "schemaVersion": 1, "foundationCheckpoint": P.CHECKPOINT_NAME})
+    with pytest.raises(ValueError, match="mixed or malformed v2"):
+        P.safetensors_weights.check_bundle_layout({**P.safetensors_weights.v2_manifest_fields(P.TASK_TYPE, "a" * 64, 10), "taskType": P.TASK_TYPE, "foundationCheckpoint": P.LEGACY_CHECKPOINT_NAME})
+    with pytest.raises(ValueError, match="unknown bundle layout"):
+        P.safetensors_weights.check_bundle_layout({**base, "schemaVersion": 3})
 
 
 def test_artifact_from_another_dataset_breaks_the_data_contract(tmp_path) -> None:
@@ -278,11 +321,14 @@ def test_deterministic_export_zip(tmp_path) -> None:
 
     art = tmp_path / "art"
     art.mkdir()
-    for name in (P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, P.CHECKPOINT_NAME):
+    manifest = json.dumps({"taskType": P.TASK_TYPE, **P.safetensors_weights.v2_manifest_fields(P.TASK_TYPE, "a" * 64, 100)}).encode()
+    for name in (P.FITTED_NAME, P.CHECKPOINT_NAME):
         (art / name).write_bytes(name.encode() * 100)
+    (art / P.ARTIFACT_MANIFEST_NAME).write_bytes(manifest)
     first = P.zip_artifact_bundle(art, tmp_path / "a.zip")
-    for name in (P.ARTIFACT_MANIFEST_NAME, P.FITTED_NAME, P.CHECKPOINT_NAME):  # new mtimes, same bytes
+    for name in (P.FITTED_NAME, P.CHECKPOINT_NAME):  # new mtimes, same bytes
         (art / name).write_bytes(name.encode() * 100)
+    (art / P.ARTIFACT_MANIFEST_NAME).write_bytes(manifest)
     assert P.zip_artifact_bundle(art, tmp_path / "b.zip") == first
     with zipfile.ZipFile(tmp_path / "a.zip") as archive:
         infos = archive.infolist()
@@ -375,8 +421,8 @@ _REPO = "https://github.com/kurtvalcorza/tabpfn-classifier-pipeline"
         f"{_REPO}/releases/download/sample-artifact-synthetic-v1/tabpfn_classifier_artifact.zip#x",
         "https://github.com/kurtvalcorza/tabicl-classifier-pipeline/releases/download/sample-artifact-magic-v1/tabiclv2_classifier_artifact.zip",
         f"{_REPO}/releases/download/sample-bundle-v1/tabpfn_classifier_sample_bundle.zip",
-        f"{_REPO}/releases/download/sample-artifact-synthetic-v2/tabpfn_classifier_artifact.zip",
-        f"{_REPO}/releases/download/sample-artifact-synthetic-v1/tabpfn_classifier_artifact.zip.sig",
+        f"{_REPO}/releases/download/sample-artifact-synthetic-v1/tabpfn_classifier_artifact.zip",
+        f"{_REPO}/releases/download/sample-artifact-synthetic-v2/tabpfn_classifier_artifact.zip.sig",
         f"{_REPO}.git",
     ],
     ids=["traversal", "tag-then-traversal", "pct2e", "pct2E-uppercase-host", "query", "fragment", "other-repo", "other-tag-old-bundle", "other-tag", "suffix", "clone"],

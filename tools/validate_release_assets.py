@@ -110,10 +110,10 @@ NOTEBOOKS = {
             "manifest = pipe.save_artifact(art)",
             "zip_sha = P.zip_artifact_bundle(art, zip_path)",
             'manifest["featureKinds"]',
-            "if manifest[\"foundationCheckpointSha256\"] != P.WEIGHTS_SHA256:",
+            "if manifest[\"foundationCheckpointSha256\"] != P.CONVERTED_SHA256:",
             "shutil.rmtree(fresh_dir, ignore_errors=True)",
-            "checked = P.validate_artifact_bundle(fresh_dir, expected_checkpoint_sha256=P.WEIGHTS_SHA256)",
-            "fresh = P.TabPFNClassifierPipeline.from_artifact(fresh_dir, device=reference[\"device\"], expected_checkpoint_sha256=P.WEIGHTS_SHA256)",
+            "checked = P.validate_artifact_bundle(fresh_dir, pinned_base=True)",
+            "fresh = P.TabPFNClassifierPipeline.from_artifact(fresh_dir, device=reference[\"device\"], pinned_base=True)",
             "np.testing.assert_allclose(proba, expected, rtol=RELOAD_RTOL, atol=RELOAD_ATOL",
             '"maxAbsProbabilityDifference": diff',
             "features = P.validate_new_rows(rows.drop(columns=passthrough), v[\"features\"], target_column=data[\"target\"], classes=v[\"classes\"])",
@@ -121,7 +121,7 @@ NOTEBOOKS = {
             '"model_license": P.MODEL_LICENSE',
             'importlib.metadata.version("tabpfn")',
             "Trusted digests of this export",
-            'SAMPLE_ARTIFACT_URL = "https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/sample-artifact-synthetic-v1/tabpfn_classifier_artifact.zip"',
+            'SAMPLE_ARTIFACT_URL = "https://github.com/kurtvalcorza/tabpfn-classifier-pipeline/releases/download/sample-artifact-synthetic-v2/tabpfn_classifier_artifact.zip"',
             'SAMPLE_ARTIFACT_SHA256 = "',
             'SAMPLE_ARTIFACT_FITTED_SHA256 = "',
             'EXTERNAL_DIR = "external_artifact"',
@@ -129,7 +129,7 @@ NOTEBOOKS = {
             'check_trusted_digest(part, expected, "the pinned SAMPLE_ARTIFACT_SHA256")',
             "members = check_members(P, zip_path)",
             "P.safe_extract_zip(zip_path, bundle)",
-            "artifact = P.validate_artifact_bundle(bundle, expected_fitted_sha256=expected_fitted, expected_checkpoint_sha256=P.WEIGHTS_SHA256)",
+            "artifact = P.validate_artifact_bundle(bundle, expected_fitted_sha256=expected_fitted, pinned_base=True)",
             "binding = check_base_model(P, manifest)",
             "check_data_contract(manifest, contract)",
             'serving = P.TabPFNClassifierPipeline.from_artifact(Path(art["bundle"])',
@@ -287,7 +287,7 @@ KERNEL_INSTALL = re.compile(r"['\"]-m['\"]\s*,\s*['\"]pip['\"]|^\s*[%!]\s*pip\b|
 # ST1 / SART6: the only github.com/kurtvalcorza reference allowed anywhere in tutorial code is the exact pinned sample-artifact
 # URL of the external-artifact section, in the stage runner only. It is built here from the tag and compared whole: no prefix
 # match, and a reference holding "..", "%2e" (any case), "?" or "#" is refused even before the comparison.
-SAMPLE_ARTIFACT_TAG = "sample-artifact-synthetic-v1"
+SAMPLE_ARTIFACT_TAG = "sample-artifact-synthetic-v2"
 PINNED_SAMPLE_ARTIFACT_URL = f"https://github.com/kurtvalcorza/{REPO_NAME}/releases/download/{SAMPLE_ARTIFACT_TAG}/tabpfn_classifier_artifact.zip"
 _OWN_REFERENCE = re.compile(r"github\.com/kurtvalcorza", re.I)
 _REFERENCE_STOP = set(" \t\r\n'\"`<>()[]{},;\\")
@@ -453,8 +453,11 @@ def validate_identity_consistency() -> None:
 WEIGHT_DOCS = ("README.md", "MODEL_CARD.md", "docs/WEIGHTS.md")
 EXTERNAL_WEIGHT_BYTES: dict[int, str] = {
     212_818_107: "untracked weights/model.ckpt, a re-serialised TabPFN-3 checkpoint copy",
+    212_699_804: "served safetensors conversion of the pinned checkpoint (pipeline.CONVERTED_BYTES)",
 }
-EXTERNAL_WEIGHT_DIGESTS: dict[str, str] = {}
+EXTERNAL_WEIGHT_DIGESTS: dict[str, str] = {
+    "f1f5408aeeffdcdfaf4842f0eff072c67ff3fbbb2c29d46d14eb564190d0b7d2": "served safetensors conversion of the pinned checkpoint (pipeline.CONVERTED_SHA256)",
+}
 _DIGEST = re.compile(r"(?<![0-9a-fA-F])[0-9a-f]{64}(?![0-9a-fA-F])")
 _GROUPED = r"(\d{1,3}(?:[,\u202f\u00a0 ]\d{3})+|\d+)"
 _BYTE_COUNT = re.compile(r"(?<![\d,\-])" + _GROUPED + r"\s*bytes\b|totalBytes`?\s*" + _GROUPED)

@@ -115,12 +115,12 @@ One generated notebook under `tutorials/` demonstrates the pipeline **without th
 `tools/notebook_template.py`, it carries
 `src/tabpfn_classifier_pipeline/pipeline.py` verbatim, the 4-file snapshot manifest of the pinned
 `Prior-Labs/tabpfn_3` checkpoint (`tabpfn-v3-classifier-v3_default.ckpt` at immutable revision
-`24a16a89d245878b846555110985634aa2e656d7`, see `docs/WEIGHTS.md`) and the `pyproject.toml` runtime pins inline, so the
+`24a16a89d245878b846555110985634aa2e656d7`, served from its pinned safetensors conversion, see `docs/WEIGHTS.md`) and the `pyproject.toml` runtime pins inline, so the
 exported `.ipynb` needs no clone, no package install, no token and no access to this repository.
 
 | Notebook | Profile | What it does |
 |---|---|---|
-| `tabpfn_classifier_colab.ipynb` | `E2E` | synthetic or BYOD table → `validate_inputs` (coded findings, identifiers kept out of the features) → **in-context** fit on the pinned checkpoint (no gradient update; a proposed RUN7 deviation) → `accuracy`, `balancedAccuracy`, `logLoss`, `rocAuc` vs the majority-class baseline and a logistic-regression reference → `evaluation_report` → artifact bundle → fresh-process reload (probabilities on every validation row equal within `rtol=1e-5`, `atol=1e-6`) → new-row scoring with identifiers kept → exports → **external-artifact section** (Section 10, NOTEBOOK_SPEC 3.0 §19.1): the pinned release asset `sample-artifact-synthetic-v1`, exported by a recorded earlier hosted run of this notebook, digest-verified before extraction, validated with `validate_artifact_bundle`, rebuilt with `from_artifact` and used to score eight rows into `outputs/external_artifact/` |
+| `tabpfn_classifier_colab.ipynb` | `E2E` | synthetic or BYOD table → `validate_inputs` (coded findings, identifiers kept out of the features) → **in-context** fit on the pinned checkpoint (no gradient update; a proposed RUN7 deviation) → `accuracy`, `balancedAccuracy`, `logLoss`, `rocAuc` vs the majority-class baseline and a logistic-regression reference → `evaluation_report` → artifact bundle → fresh-process reload (probabilities on every validation row equal within `rtol=1e-5`, `atol=1e-6`) → new-row scoring with identifiers kept → exports → **external-artifact section** (Section 10, NOTEBOOK_SPEC 3.0 §19.1): the pinned release asset `sample-artifact-synthetic-v2` (the bundle-format v2 re-issue of `sample-artifact-synthetic-v1`, exported by a recorded earlier hosted run of this notebook), digest-verified before extraction, validated with `validate_artifact_bundle`, rebuilt with `from_artifact` and used to score eight rows into `outputs/external_artifact/` |
 
 NOTEBOOK_SPEC 3.0 retired the separate `ARTIFACT-INFERENCE` companion notebook (KND11); its capability is the
 external-artifact section above, and its script-built sample bundle (`sample-bundle-v1`) is no longer used.
@@ -138,7 +138,7 @@ frames = read_dataset_zip(build_synthetic_dataset("synthetic.zip"))
 manifest = validate_inputs(frames["train.csv"], "target", val=frames["val.csv"])  # raises InputRejected
 pipe.fit(X_train, y_train, target_column="target")           # in-context: no gradient update
 metrics = pipe.evaluate(X_val, y_val)
-pipe.save_artifact("artifact")                               # model.tabpfn_fit + model.ckpt + artifact_manifest.json
+pipe.save_artifact("artifact")                               # model.tabpfn_fit + model.safetensors + artifact_manifest.json (bundle format v2)
 fresh = TabPFNClassifierPipeline.from_artifact("artifact")            # validates the bundle, then reloads
 ```
 
@@ -147,11 +147,10 @@ Static gates (also run by CI): `ruff check .`, `pytest -m "not integration"`, `p
 
 ## Release status
 
-**Candidate — the current E2E blob `e705db6e` (regenerated from `c6e880b`, which shows a refused user input as one `Refused:` line;
-DAT19/DAT20) has its default path and its optional activity recorded by hosted Colab T4 runs at `9e69f88` (2026-10-23, PASS,
-14/14 code cells, 0 errors each). The runs at `197d45b` (2026-10-22, PASS) cover the previous blob `7d8051f7` and are history
-(REL14). Pending only a BYOD run (one input accepted, one refused; REL12) and a browser run of the interactive journeys (REL2)
-before promotion** (`STATUS.md`). The
+**Candidate — the current E2E blob `b86763c1` (PR #33: the external-artifact section's default is the v2 release `sample-artifact-synthetic-v2`, `8828df98…`) ran its default path and, in a `RUN_ACTIVITY = True` run copy, the optional activity on fresh hosted Colab T4 sessions at `f4ff797` (2026-10-24, PASS, 14/14 code cells each); Section 10 verified the v2 asset and loaded it with no v1 `DeprecationWarning`. It stays Candidate until REL12 and REL2 are recorded. The runs of the previous blob are history (REL14): the E2E blob `dd694637` (regenerated from `b0154d1`: bundle format v2 with `model.safetensors`, see `DIMER_CONTRACT.md`; stacked on `3b451d9`, which serves the model from the pinned safetensors conversion of the checkpoint; the guard of `057ab9d` against a pickle load without `weights_only` stays) ran its default path and, in a `RUN_ACTIVITY = True` run copy, the optional activity on fresh hosted Colab T4 sessions at `f3a35be` (2026-10-24, PASS, 14/14 code cells each). The runs at
+`b12ca85` of blob `020eaa85`, at `641152f` of blob `41dc2a68`, at `9e69f88` of blob `e705db6e` and at `197d45b` of blob `7d8051f7` are history (REL14). A
+BYOD run (one input accepted, one refused; REL12) and a
+browser run of the interactive journeys (REL2) are required before promotion** (`STATUS.md`). The
 standalone notebook passes static validation and the generator parity checks; its clean-runtime runs are recorded — and
 gate promotion — in `docs/release-verification.md`.
 
@@ -377,7 +376,7 @@ A successful run writes the DIMER artifact layout under the run's output directo
 /data/fine-tuning/<run_id>/
 ├── artifacts/
 │   ├── model.tabpfn_fit         fitted estimator (foundation weights omitted from this archive)
-│   ├── model.ckpt               foundation / fine-tuned checkpoint
+│   ├── model.safetensors        foundation / fine-tuned weights (bundle format v2; no pickle)
 │   └── artifact_manifest.json   target, ordered features, classes, artifact names + SHA-256s
 ├── evaluation/report.json       validation / optional test metrics + provenance
 ├── logs/run-summary.json        run parameters, device, provenance summary
@@ -403,10 +402,11 @@ a `test.csv`:
     "test": { "..": ".." }
   },
   "artifacts": {
-    "modelArtifact":      { "path": "fine-tuning/<run_id>/artifacts/model.tabpfn_fit", "name": "model.tabpfn_fit", "contentType": "application/octet-stream", "sizeBytes": N },
+    "modelArtifact":      { "path": "fine-tuning/<run_id>/artifacts/model.tabpfn_fit", "name": "model.tabpfn_fit", "contentType": "application/octet-stream", "sizeBytes": N, "sha256": ".." },
+    "modelWeights":       { "path": "fine-tuning/<run_id>/artifacts/model.safetensors", "name": "model.safetensors", "contentType": "application/octet-stream", "sizeBytes": N, "sha256": ".." },
     "evaluationReport":   { "path": "fine-tuning/<run_id>/evaluation/report.json", "..": ".." },
     "logArtifact":        { "path": "fine-tuning/<run_id>/logs/run-summary.json", "..": ".." },
-    "foundationCheckpoint": { "path": "fine-tuning/<run_id>/artifacts/model.ckpt", "..": ".." },
+    "foundationCheckpoint": { "path": "fine-tuning/<run_id>/artifacts/model.safetensors", "..": ".." },
     "manifest": { "..": ".." },
     "fittedSha256": "..", "foundationCheckpointSha256": "..",
     "reloadCheck": { "passed": true, "device": "cpu", "rows": N }
@@ -417,9 +417,9 @@ a `test.csv`:
 ```
 
 DIMER's `export-to-repository` resolves the exportable model by **`artifacts.modelArtifact`** —
-`model.tabpfn_fit`, keyed by a `/data`-relative `path` (in GPU-burst mode it instead carries the
+`model.tabpfn_fit` (now with its `sha256`), keyed by a `/data`-relative `path` (in GPU-burst mode it instead carries the
 uploaded S3 model **`key`**). There is **no literal `best.pt` requirement** on the default path.
-`foundationCheckpoint` (`model.ckpt`) is the second file the in-context learner needs at serve time;
+`modelWeights` (`model.safetensors`, with `sha256` and `sizeBytes`; `foundationCheckpoint` names the same file, `model.ckpt` in deprecated v1 bundles, see `DIMER_CONTRACT.md`) is the second file the in-context learner needs at serve time. `model.tabpfn_fit` is code-capable (ARTIFACT_SPEC SER9: reloading it unpickles its joblib state), so it is trusted only as far as `modelArtifact.sha256` / the manifest's `fittedEstimatorSha256`;
 `manifest`, `evaluationReport`, and `logArtifact` accompany them.
 
 `artifacts.reloadCheck` is written only after the fine-tuner reloads the just-saved artifact
@@ -433,7 +433,7 @@ with `metadata.baseModel` / `selectedModelId` still populated.
 `model_path`. Because DIMER may relocate artifacts between training and serving,
 [`serving/load_artifact.py`](serving/load_artifact.py) is directory-parameterized: given the
 artifact directory, it rewrites the fitted archive's `model_path` (in a temporary copy — the
-original is never modified) to point at the colocated `model.ckpt`, then loads the estimator. Both
+original is never modified) to point at the colocated `model.safetensors` (a v1 `model.ckpt` is first read with `weights_only=True` into a temporary safetensors file), then loads the estimator. Both
 files sit under `artifacts/`. This is the same rewrite the fine-tuner's in-runtime reload check
 performs.
 
@@ -521,7 +521,7 @@ from Prior Labs.
 | v3 weights | [`Prior-Labs/tabpfn_3`](https://huggingface.co/Prior-Labs/tabpfn_3) (not access-gated; non-commercial) |
 | Licence | `v2` Apache-derived (commercial OK); `v2.5` / `v2.6` / `v3` non-commercial |
 | Component pins | `COMPONENTS.json` (immutable validator + finetuner commit SHAs) |
-| Standalone-notebook pin | `Prior-Labs/tabpfn_3` @ `24a16a89d245878b846555110985634aa2e656d7`, `tabpfn-v3-classifier-v3_default.ckpt` SHA-256 `d0d865d54dfbc524f5703104be90620182dca7e5fb2c16de72e9959ea18f3988` (`weights/tabpfn-3-classifier/dimer-base-manifest.json`, `docs/WEIGHTS.md`) |
+| Standalone-notebook pin | `Prior-Labs/tabpfn_3` @ `24a16a89d245878b846555110985634aa2e656d7`, `tabpfn-v3-classifier-v3_default.ckpt` SHA-256 `d0d865d54dfbc524f5703104be90620182dca7e5fb2c16de72e9959ea18f3988` (`weights/tabpfn-3-classifier/dimer-base-manifest.json`, `docs/WEIGHTS.md`); served file `tabpfn-v3-classifier-v3_default.safetensors` SHA-256 `f1f5408aeeffdcdfaf4842f0eff072c67ff3fbbb2c29d46d14eb564190d0b7d2` (`CONVERTED_SHA256`) |
 
 Strongest provenance comes from mounting a specific approved checkpoint via
 `DIMER_TABPFN_MODEL_PATH`: the run hashes that exact file into `provenance.model.baseModelSha256`

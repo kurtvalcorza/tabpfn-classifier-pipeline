@@ -93,10 +93,11 @@ for the production profile.
   "artifacts": {
     "modelArtifact":    { "path": "fine-tuning/<run_id>/artifacts/model.tabpfn_fit",
                           "name": "model.tabpfn_fit", "contentType": "application/octet-stream",
-                          "sizeBytes": N },
+                          "sizeBytes": N, "sha256": ".." },
+    "modelWeights":     { "path": "fine-tuning/<run_id>/artifacts/model.safetensors", "sha256": "..", "sizeBytes": N, "..": ".." },
     "evaluationReport": { "path": "fine-tuning/<run_id>/evaluation/report.json", "..": ".." },
     "logArtifact":      { "path": "fine-tuning/<run_id>/logs/run-summary.json", "..": ".." },
-    "foundationCheckpoint": { "path": "fine-tuning/<run_id>/artifacts/model.ckpt", "..": ".." },
+    "foundationCheckpoint": { "path": "fine-tuning/<run_id>/artifacts/model.safetensors", "..": ".." },
     "manifest": { "..": ".." }, "fittedSha256": "..", "foundationCheckpointSha256": "..",
     "reloadCheck": { "passed": true, "device": "cpu", "rows": N }
   },

@@ -154,7 +154,7 @@ validation rows (`one_row_resolution` 0.0111), `max_abs_probability_change` 0.10
 | `tabpfn_classifier_colab_197d45b_colab-cli-t4_activity_run_summary.json` | `9655dc7351df3e0bdec272ce7647b477e1ce8f5862a47cea4acf0fadf207d468` | unchanged (no local path) |
 | `tabpfn_classifier_colab_197d45b_colab-cli-t4_activity_run_copy.ipynb` | `1d36ec2ecbff48c3991f0a58a7a2da2e243093a20f1a12d59e595d6dc5d08d47` | unchanged (no local path) |
 
-**Hosted default-path run of blob `e705db6eb176` (2026-10-23, `9e69f88`; the current blob).** Colab CLI `colab exec -f`
+**Hosted default-path run of blob `e705db6eb176` (2026-10-23, `9e69f88`; the current blob until `057ab9d`, now history).** Colab CLI `colab exec -f`
 (a scripted run, not a browser Run all) on a fresh Colab Tesla T4, default path of `tutorials/tabpfn_classifier_colab.ipynb`
 at `9e69f88`, executed as committed, started 2026-10-23T08:53:20Z, wall 142.0 s, exit 0, sequential, input unchanged, 14/14
 code cells, 0 errors, verdict PASS. Evidence: `docs/execution-evidence/2026-10-23-9e69f88/`. Printed: majority-class baseline
@@ -171,7 +171,7 @@ paths were replaced by `<local-run-dir>` before the first commit:
 | `tabpfn_classifier_colab_9e69f88_colab-cli-t4_exec.log` | `c305728676a76dbc4a888cdb4ebb0f7424fab8e3513e86d26b8da0f7425d53a2` | `1f0b18e82f6338d9b65de157eedebd511e1d7c6e8ffb69eb438322eae48d4de7` (2 replacements) |
 | `tabpfn_classifier_colab_9e69f88_colab-cli-t4_run_summary.json` | `3648cc0fd260d98aba47625f67238fe72ab109058b88cbf3c66b48f25c0b1a5e` | unchanged (no local path) |
 
-**Optional-activity run of blob `e705db6eb176` (2026-10-23, `9e69f88`, `RUN_ACTIVITY = True`; the current blob).** A run copy
+**Optional-activity run of blob `e705db6eb176` (2026-10-23, `9e69f88`, `RUN_ACTIVITY = True`; history).** A run copy
 of committed blob `e705db6e` with one override, `RUN_ACTIVITY = False` → `True` (run copy blob `9cb5e29298ac`, SHA-256
 `e9d59aef2f2a891f18ba616d5d97b9f48e34ae75e66c224225b7385ee22564ab`; it differs from the committed blob only in that assignment
 literal and is committed beside the evidence as `…_activity_run_copy.ipynb`), run by Colab CLI `colab exec -f` (scripted, not a
@@ -189,9 +189,180 @@ replaced by `<local-run-dir>` before the first commit:
 | `tabpfn_classifier_colab_9e69f88_colab-cli-t4_activity_run_copy.ipynb` | `e9d59aef2f2a891f18ba616d5d97b9f48e34ae75e66c224225b7385ee22564ab` | unchanged (no local path) |
 | `tabpfn_classifier_colab_9e69f88_colab-cli-t4_activity_run_summary.json` | `3babac27e56c93db90bb29ba08b8a1f1a31fe2c4a8c814a559913bf74be85a2c` | unchanged (no local path) |
 
+**Hosted default-path run of blob `41dc2a680767` (2026-10-24, `641152f`; the PR #29 blob, history since `3b451d9`).** Colab CLI `colab exec -f`
+(a scripted run, not a browser Run all) on a fresh Colab Tesla T4, default path of `tutorials/tabpfn_classifier_colab.ipynb`
+at `641152f`, executed as committed, started 2026-10-24T11:33:58Z, wall 149.4 s, exit 0, sequential, input unchanged, 14/14
+code cells, 0 errors, verdict PASS. Evidence: `docs/execution-evidence/2026-10-24-641152f/`. Printed: torch 2.11.0, tabpfn
+8.1.0 (cuda); checkpoint `tabpfn-v3-classifier-v3_default.ckpt` at revision `24a16a89d245` with SHA-256 `d0d865d5…f3988`;
+majority-class baseline validation accuracy 0.3333; TabPFN validation accuracy 0.9778 / log loss 0.0658 / ROC AUC 0.9994,
+test accuracy 0.9778 / log loss 0.0794 / ROC AUC 0.9978; logistic-regression reference 0.9111 (validation) / 0.9444 (test);
+"Fresh-boundary verification PASSED: probabilities equivalent on 90 validation rows (rtol=1e-05, atol=1e-06)"; Section 10
+reported `trusted_digest: verified (pinned SAMPLE_ARTIFACT_SHA256 and SAMPLE_ARTIFACT_FITTED_SHA256)` for `8fe248e2…`; the
+activity cell printed "Optional activity skipped". This run's own export printed `EXPECTED_ZIP_SHA256 = '9620244c…9e89'` and
+`EXPECTED_FITTED_SHA256 = '66b94274…c073'`. No output mentions the new `weights_only` guard (torch 2.11.0 is above its
+2.6 floor), so its refusal branch was not exercised. Local paths were replaced by `<local-run-dir>` before the first commit:
+
+| File (under `execution-evidence/2026-10-24-641152f/`) | Captured | Committed |
+|---|---|---|
+| `tabpfn_classifier_colab_641152f_colab-cli-t4.ipynb` | `51e452d28b925e05516ce1c05b781d85fb1c87826f8ab2ba720b709d23943aff` | unchanged (no local path) |
+| `tabpfn_classifier_colab_641152f_colab-cli-t4_exec.log` | `9a868f899c797693cdfbbbd94acd5c86d406abb7d21148c499451c445a56c9bc` | `c2b8b665af7693da54f2a39db55e6a4325d48fc2352625aaa5a7cc0d0ac3ff27` (2 replacements) |
+| `tabpfn_classifier_colab_641152f_colab-cli-t4_run_summary.json` | `0ac210183ea3a18c599bee514670bacfc44cc70b5f6e89ebf7ea58ee71355c87` | unchanged (no local path) |
+
+**Optional-activity run of blob `41dc2a680767` (2026-10-24, `641152f`, `RUN_ACTIVITY = True`; history).** A run copy
+of committed blob `41dc2a68` with one override, `RUN_ACTIVITY = False` → `True` (run copy blob `67407170f07c`, SHA-256
+`f73f67d818f052e5c55e9090a18099ff92fd05fc2874a947ef0b083abcee7940`; it differs from the committed blob only in that assignment
+literal and is committed beside the evidence as `…_activity_run_copy.ipynb`), run by Colab CLI `colab exec -f` (scripted, not a
+browser Run all) on a fresh Colab Tesla T4, started 2026-10-24T12:56:15Z, wall 147.6 s, exit 0, sequential, input (the run copy)
+unchanged, 14/14 code cells, 0 errors, verdict PASS. Evidence: `docs/execution-evidence/2026-10-24-641152f-activity/`. The
+canonical stages printed the same metrics as the default-path run above. The Section 11 activity (`n_estimators` 4 → 1)
+printed validation accuracy 0.9778 → 0.9778, log loss 0.0658 → 0.0607, ROC AUC 0.9994 → 0.9998 on 90 validation rows,
+`max_abs_probability_change` 0.1001, `labels_changed` 0, and `{'canonical_outputs_unchanged': True}`. Local paths were
+replaced by `<local-run-dir>` before the first commit:
+
+| File (under `execution-evidence/2026-10-24-641152f-activity/`) | Captured | Committed |
+|---|---|---|
+| `tabpfn_classifier_colab_641152f_colab-cli-t4_activity.ipynb` | `b0d3edb4aaec03587624f8996480af6fe5d049572fb5d3cbf4bdb2f66ed2f1e8` | unchanged (no local path) |
+| `tabpfn_classifier_colab_641152f_colab-cli-t4_activity_exec.log` | `9605ab11bdf3d51fcd2787298dbd16090e4df75bb908df7c5a20348934f8e393` | `1a310f5d1e38ebef98e057ef7e87403bd5f365b7197b72a13736544745261a35` (2 replacements) |
+| `tabpfn_classifier_colab_641152f_colab-cli-t4_activity_run_copy.ipynb` | `f73f67d818f052e5c55e9090a18099ff92fd05fc2874a947ef0b083abcee7940` | unchanged (no local path) |
+| `tabpfn_classifier_colab_641152f_colab-cli-t4_activity_run_summary.json` | `89b7f5a9907e0d39b85ac5716393f20c7366d0366b5685965a6a608f441c3c29` | unchanged (no local path) |
+
+**Hosted default-path run of blob `020eaa852c3f` (2026-10-24, `b12ca85`; the PR #31 blob, safetensors serving, history since `b0154d1`).** Colab CLI
+`colab exec -f` (a scripted run, not a browser Run all) on a fresh Colab Tesla T4, default path of
+`tutorials/tabpfn_classifier_colab.ipynb` at `b12ca85`, executed as committed, started 2026-10-24T13:01:58Z, wall 164.3 s,
+exit 0, sequential, input unchanged, 14/14 code cells, 0 errors, verdict PASS. Evidence:
+`docs/execution-evidence/2026-10-24-b12ca85/`. The weights stage fetched and verified `tabpfn-v3-classifier-v3_default.ckpt`
+at revision `24a16a89d245` (`'sha256': 'd0d865d54dfbc524f5703104be90620182dca7e5fb2c16de72e9959ea18f3988'`) and printed the
+served model: `{'served_file': 'tabpfn-v3-classifier-v3_default.safetensors', 'sha256':
+'f1f5408aeeffdcdfaf4842f0eff072c67ff3fbbb2c29d46d14eb564190d0b7d2', 'bytes': 212699804, 'converted_from':
+'tabpfn-v3-classifier-v3_default.ckpt'}`, the digest pinned as `pipeline.CONVERTED_SHA256`. The fresh-boundary record names
+`recordedModelPath` `/content/weights/tabpfn-3-classifier/tabpfn-v3-classifier-v3_default.safetensors`. Printed:
+majority-class baseline validation accuracy 0.3333; TabPFN validation accuracy 0.9778 / log loss 0.0658 / ROC AUC 0.9994,
+test accuracy 0.9778 / log loss 0.0794 / ROC AUC 0.9978 (the same values as the pickle-served `641152f` run);
+logistic-regression reference 0.9111 (validation) / 0.9444 (test); "Fresh-boundary verification PASSED: probabilities
+equivalent on 90 validation rows (rtol=1e-05, atol=1e-06)"; Section 10 reported `trusted_digest: verified (pinned
+SAMPLE_ARTIFACT_SHA256 and SAMPLE_ARTIFACT_FITTED_SHA256)` for `8fe248e2…` with `checkpoint_binding: identical to the pinned
+base checkpoint (SHA-256 checked)`; the activity cell printed "Optional activity skipped". The run's own export still lists
+`model.ckpt` in the bundle (`['artifact_manifest.json', 'model.ckpt', 'model.tabpfn_fit']`) and printed
+`EXPECTED_ZIP_SHA256 = '19ad8fa9…320d'` and `EXPECTED_FITTED_SHA256 = '0050c8aa…094b'`. Local paths were replaced by
+`<local-run-dir>` before the first commit:
+
+| File (under `execution-evidence/2026-10-24-b12ca85/`) | Captured | Committed |
+|---|---|---|
+| `tabpfn_classifier_colab_b12ca85_colab-cli-t4.ipynb` | `c4cd8dc1f16a9635d3edf7fe895266a30601b9bcd107eed547c576d846994a11` | unchanged (no local path) |
+| `tabpfn_classifier_colab_b12ca85_colab-cli-t4_exec.log` | `fafa2b8376d6abd74e3d32ce0a65e65726c426748ec8e9d945ccac50bf0c9098` | `b2ad793780c2fdadfed3e1395b0bb7119cec0b27233b6a29ef67e12935ec0c75` (2 replacements) |
+| `tabpfn_classifier_colab_b12ca85_colab-cli-t4_run_summary.json` | `d7903b52a22cb460b2599db320c1c3cc4b06cc5607d6af0fcb03b6f0728a654e` | unchanged (no local path) |
+
+**Optional-activity run of blob `020eaa852c3f` (2026-10-24, `b12ca85`, `RUN_ACTIVITY = True`; history).** A run copy
+of committed blob `020eaa85` with one override, `RUN_ACTIVITY = False` → `True` (run copy blob `e1b7b1ee6309`, SHA-256
+`831764d175de298e539705a408015dd21b9a1d12b24b17b2f470bf96ca0785cc`; it differs from the committed blob only in that assignment
+literal and is committed beside the evidence as `…_activity_run_copy.ipynb`), run by Colab CLI `colab exec -f` (scripted, not a
+browser Run all) on a fresh Colab Tesla T4, started 2026-10-24T13:04:56Z, wall 180.3 s, exit 0, sequential, input (the run copy)
+unchanged, 14/14 code cells, 0 errors, verdict PASS. Evidence: `docs/execution-evidence/2026-10-24-b12ca85-activity/`. It
+printed the same served file and digest (`f1f5408a…b7d2`, 212699804 bytes) and the same canonical metrics as the
+default-path run above. The Section 11 activity (`n_estimators` 4 → 1) printed validation accuracy 0.9778 → 0.9778, log loss
+0.0658 → 0.0607, ROC AUC 0.9994 → 0.9998 on 90 validation rows, `max_abs_probability_change` 0.1001, `labels_changed` 0, and
+`{'canonical_outputs_unchanged': True}`. Local paths were replaced by `<local-run-dir>` before the first commit:
+
+| File (under `execution-evidence/2026-10-24-b12ca85-activity/`) | Captured | Committed |
+|---|---|---|
+| `tabpfn_classifier_colab_b12ca85_colab-cli-t4_activity.ipynb` | `ecfda29005b9529a8f432f0a32dea1d9cca31f73acaa558a45ff458cdbe92227` | unchanged (no local path) |
+| `tabpfn_classifier_colab_b12ca85_colab-cli-t4_activity_exec.log` | `6c227faef4e2ef61442bb14bff5881a44b4f8983f34e159a178c1db341664a56` | `9af8f2bf524f473b9f8c23e31fd835ff0445f7affac1db3b9cb1a0c445c0b759` (2 replacements) |
+| `tabpfn_classifier_colab_b12ca85_colab-cli-t4_activity_run_copy.ipynb` | `831764d175de298e539705a408015dd21b9a1d12b24b17b2f470bf96ca0785cc` | unchanged (no local path) |
+| `tabpfn_classifier_colab_b12ca85_colab-cli-t4_activity_run_summary.json` | `72c3d636fd76ab9008c18537c2dedbb22125d08409baaa877ac3f3aa26190dea` | unchanged (no local path) |
+
+**Hosted default-path run of blob `dd6946379122` (2026-10-24, `f3a35be`, PR #32 head; bundle format v2).** Colab CLI
+`colab exec -f` (a scripted run, not a browser Run all) on a fresh Colab Tesla T4, default path of
+`tutorials/tabpfn_classifier_colab.ipynb` at `f3a35be`, executed as committed, started 2026-10-24T13:14:23Z, wall 158.8 s,
+exit 0, sequential, input unchanged, 14/14 code cells, 0 errors, verdict PASS. Evidence:
+`docs/execution-evidence/2026-10-24-f3a35be/`. The weights stage verified `tabpfn-v3-classifier-v3_default.ckpt` at revision
+`24a16a89d245` (`d0d865d5…f3988`) and printed the served model: `{'served_file': 'tabpfn-v3-classifier-v3_default.safetensors',
+'sha256': 'f1f5408aeeffdcdfaf4842f0eff072c67ff3fbbb2c29d46d14eb564190d0b7d2', 'bytes': 212699804, 'converted_from':
+'tabpfn-v3-classifier-v3_default.ckpt'}`. The run's own export is a v2 bundle: `{'artifact': ['artifact_manifest.json',
+'model.safetensors', 'model.tabpfn_fit'], 'fittedEstimatorSha256': 'f3016e5abfa8f4c270f3b3971d603effa81cfd54c50a8f9a70912005331b2ca9',
+'foundationCheckpointSha256': 'f1f5408aeeffdcdfaf4842f0eff072c67ff3fbbb2c29d46d14eb564190d0b7d2', 'bundle_zip':
+'tabpfn_classifier_artifact.zip', 'bundle_zip_sha256': '146f4e30049ae9f0fd3c6c26ea24ab481a850b23d88f9b4962e7aa7dee2f20f6'}`, so its
+foundation digest is the served conversion's. Printed: majority-class baseline validation accuracy 0.3333; TabPFN validation
+accuracy 0.9778 / log loss 0.0658 / ROC AUC 0.9994, test accuracy 0.9778 / log loss 0.0794 / ROC AUC 0.9978; logistic-regression
+reference 0.9111 (validation) / 0.9444 (test); "Fresh-boundary verification PASSED: probabilities equivalent on 90 validation
+rows (rtol=1e-05, atol=1e-06)", with `recordedModelPath` `/content/weights/tabpfn-3-classifier/tabpfn-v3-classifier-v3_default.safetensors`.
+Section 10 loaded the v1 sample `sample-artifact-synthetic-v1` and reported `trusted_digest: verified (pinned SAMPLE_ARTIFACT_SHA256
+and SAMPLE_ARTIFACT_FITTED_SHA256)` for `8fe248e2…`, `'bundleFormat': 'v1 (deprecated: model.ckpt)'` and `checkpoint_binding:
+identical to the pinned base checkpoint (SHA-256 checked; deprecated bundle format v1, read with weights_only=True)`; the activity
+cell printed "Optional activity skipped". Local paths were replaced by `<local-run-dir>` before the first commit:
+
+| File (under `execution-evidence/2026-10-24-f3a35be/`) | Captured | Committed |
+|---|---|---|
+| `tabpfn_classifier_colab_f3a35be_colab-cli-t4.ipynb` | `ba8377b268433c3345e348f7dc1c2d52668e5107763e718021e56b325bee8a5a` | unchanged (no local path) |
+| `tabpfn_classifier_colab_f3a35be_colab-cli-t4_exec.log` | `77cfe42a1d4b4d10a138f5551546247aa2f3b99fb830750560934a4d5d605ce8` | `f657a2c048c7d9e3d394a3ab302ceb684a05f8a39e94fb0a5abfa9002beea64d` (2 replacements) |
+| `tabpfn_classifier_colab_f3a35be_colab-cli-t4_run_summary.json` | `8bc6494cae16e11571e316d75ee6332cff0d88fb78a2c79fd83f8cd8b6b149ba` | unchanged (no local path) |
+
+**Optional-activity run of blob `dd6946379122` (2026-10-24, `f3a35be`, `RUN_ACTIVITY = True`, PR #32 head).** A run copy
+of committed blob `dd694637` with one override, `RUN_ACTIVITY = False` → `True` (run copy blob `fca5b0be3d05`, SHA-256
+`2aefcdfe21d6fe53e8b745a4eff6172cf4c5ab129dae02c87e85e1cf109a83ee`; it differs from the committed blob only in that assignment
+literal and is committed beside the evidence as `…_activity_run_copy.ipynb`), run by Colab CLI `colab exec -f` (scripted, not a
+browser Run all) on a fresh Colab Tesla T4, started 2026-10-24T13:17:14Z, wall 163.2 s, exit 0, sequential, input (the run copy)
+unchanged, 14/14 code cells, 0 errors, verdict PASS. Evidence: `docs/execution-evidence/2026-10-24-f3a35be-activity/`. It
+printed the same served file and digest (`f1f5408a…b7d2`) and the same canonical metrics as the default-path run above. The
+Section 11 activity (`n_estimators` 4 → 1) printed validation accuracy 0.9778 → 0.9778, log loss 0.0658 → 0.0607, ROC AUC
+0.9994 → 0.9998 on 90 validation rows, `max_abs_probability_change` 0.1001, `labels_changed` 0, and
+`{'canonical_outputs_unchanged': True}`. Local paths were replaced by `<local-run-dir>` before the first commit:
+
+| File (under `execution-evidence/2026-10-24-f3a35be-activity/`) | Captured | Committed |
+|---|---|---|
+| `tabpfn_classifier_colab_f3a35be_colab-cli-t4_activity.ipynb` | `8a8497c86b64d9cdf0b4af8f7ea398437e3aeae86a6a4779b774bcbf7317aee0` | unchanged (no local path) |
+| `tabpfn_classifier_colab_f3a35be_colab-cli-t4_activity_exec.log` | `8b9905cc7eb87a82f31fd863e609a23fe692807babda6d943639102bd202a710` | `250fb3a504e00a1aee74cf0098012b64f31cd1974687f4c2c964ab4e3463f2b2` (2 replacements) |
+| `tabpfn_classifier_colab_f3a35be_colab-cli-t4_activity_run_copy.ipynb` | `2aefcdfe21d6fe53e8b745a4eff6172cf4c5ab129dae02c87e85e1cf109a83ee` | unchanged (no local path) |
+| `tabpfn_classifier_colab_f3a35be_colab-cli-t4_activity_run_summary.json` | `418b81bf3b5ab04018e4213be2cc65161b9fb4aabd0716aa40517b9fa4216b3e` | unchanged (no local path) |
+
+**Hosted default-path run of blob `b86763c1e8e6` (2026-10-24, `f4ff797`, PR #33 head; v2 sample artifact by default).** Colab CLI
+`colab exec -f` (a scripted run, not a browser Run all) on a fresh Colab Tesla T4, default path of
+`tutorials/tabpfn_classifier_colab.ipynb` at `f4ff797`, executed as committed, started 2026-10-24T16:04:36Z, wall 162.0 s,
+exit 0, sequential, input unchanged, 14/14 code cells, 0 errors, verdict PASS. Evidence:
+`docs/execution-evidence/2026-10-24-f4ff797/`. The carried package revision is `ea57226`. The weights stage verified `tabpfn-v3-classifier-v3_default.ckpt` at revision `24a16a89d245` (`d0d865d5…f3988`) and printed the served model: `{'served_file': 'tabpfn-v3-classifier-v3_default.safetensors',
+'sha256': 'f1f5408aeeffdcdfaf4842f0eff072c67ff3fbbb2c29d46d14eb564190d0b7d2', 'bytes': 212699804, 'converted_from':
+'tabpfn-v3-classifier-v3_default.ckpt'}`. The run's own export is a v2 bundle: `{'artifact': ['artifact_manifest.json',
+'model.safetensors', 'model.tabpfn_fit'], 'fittedEstimatorSha256': 'f9d2883dfda041293bb27170fa084c987f3df6d87fd843ff052a26a7dbe2ee50',
+'foundationCheckpointSha256': 'f1f5408aeeffdcdfaf4842f0eff072c67ff3fbbb2c29d46d14eb564190d0b7d2', 'bundle_zip':
+'tabpfn_classifier_artifact.zip', 'bundle_zip_sha256': 'c0e70f09d5d670e6e68c5699f059e7aa07d6171c20a279942ca6912db3815aab'}`. Printed: majority-class baseline validation accuracy 0.3333; TabPFN validation
+accuracy 0.9778 / log loss 0.0658 / ROC AUC 0.9994, test accuracy 0.9778 / log loss 0.0794 / ROC AUC 0.9978; logistic-regression
+reference 0.9111 (validation) / 0.9444 (test); "Fresh-boundary verification PASSED: probabilities equivalent on 90 validation
+rows (rtol=1e-05, atol=1e-06)" (`maxAbsProbabilityDifference` 0.0, `labelsIdentical` true), with `recordedModelPath` `/content/weights/tabpfn-3-classifier/tabpfn-v3-classifier-v3_default.safetensors`.
+**Section 10 loaded the v2 default:** it downloaded the asset of release `sample-artifact-synthetic-v2` and reported
+`trusted_digest: verified (pinned SAMPLE_ARTIFACT_SHA256 and SAMPLE_ARTIFACT_FITTED_SHA256)` for `8828df98a2db8047bc2d52313a5a173bfa499d8b780619899def268dee31b41c`,
+`'bundleFormat': 'tabpfn-dimer-classifier-v2'` and `checkpoint_binding: identical to the pinned conversion of the base checkpoint (SHA-256 checked;
+bundle format v2)`, then rebuilt the estimator from the bundle and wrote its two `outputs/external_artifact/` files. No
+`DeprecationWarning` and no "deprecated bundle format v1" line appears in the executed outputs or `exec.log` (the `f3a35be` run
+above printed one for the v1 pin `8fe248e2…`). The activity cell printed "Optional activity skipped". Local paths were replaced by
+`<local-run-dir>` before the first commit:
+
+| File (under `execution-evidence/2026-10-24-f4ff797/`) | Captured | Committed |
+|---|---|---|
+| `tabpfn_classifier_colab_f4ff797_colab-cli-t4.ipynb` | `8ebff2101704d2e36185a3e7e4214ab4a342f2f8381ee5d5a977291a63e4f607` | unchanged (no local path) |
+| `tabpfn_classifier_colab_f4ff797_colab-cli-t4_exec.log` | `62531b2b8445431b06d4b08eedc8f8126b1a40e2ddb690ee41ca367a6c4d1044` | `1ac648773ffe95f8ebf89a4e3b7ddc1c629407a9ce019bc78898d70953c73927` (2 replacements) |
+| `tabpfn_classifier_colab_f4ff797_colab-cli-t4_run_summary.json` | `df2d4be01d44a3fde9908a118a61ae46afb331d2f80baa4966a5394527d9ce61` | unchanged (no local path) |
+
+**Optional-activity run of blob `b86763c1e8e6` (2026-10-24, `f4ff797`, `RUN_ACTIVITY = True`, PR #33 head).** A run copy
+of committed blob `b86763c1` with one override, `RUN_ACTIVITY = False` → `True` (run copy blob `06e2dcff6261`, SHA-256
+`237dd424536a6a75db00172ee07e667b8278ab56897342070ce4de145f8e7ac4`; it differs from the committed blob only in that assignment
+literal and is committed beside the evidence as `…_activity_run_copy.ipynb`), run by Colab CLI `colab exec -f` (scripted, not a
+browser Run all) on a fresh Colab Tesla T4, started 2026-10-24T16:05:53Z, wall 164.1 s, exit 0, sequential, input (the run copy)
+unchanged, 14/14 code cells, 0 errors, verdict PASS. Evidence: `docs/execution-evidence/2026-10-24-f4ff797-activity/`. It
+printed the same served file and digest (`f1f5408a…b7d2`) and the same canonical metrics as the default-path run above; its
+export printed `fc39bb23…` (fitted `ea5a829a…`) and the fresh-boundary reload PASSED. Section 10 verified the v2 asset `8828df98…` (`tabpfn-dimer-classifier-v2`)
+with no `DeprecationWarning`. The Section 11 activity (`n_estimators` 4 → 1) printed validation accuracy 0.9778 → 0.9778, log loss 0.0658 → 0.0607, ROC AUC
+0.9994 → 0.9998 on 90 validation rows, `max_abs_probability_change` 0.1001, `labels_changed` 0, and
+`{'canonical_outputs_unchanged': True}`. Local paths were replaced by `<local-run-dir>` before the first commit:
+
+| File (under `execution-evidence/2026-10-24-f4ff797-activity/`) | Captured | Committed |
+|---|---|---|
+| `tabpfn_classifier_colab_f4ff797_colab-cli-t4_activity.ipynb` | `e8a65db9ea5f21ddefe488cb94ef6831945a6cdb0d641b04622d89971aece510` | unchanged (no local path) |
+| `tabpfn_classifier_colab_f4ff797_colab-cli-t4_activity_exec.log` | `7da7ee6527e792825c195265d8dc543f42e6b1c840dfd8b2046bc9868de4e82f` | `545a813278a66e1c15bfda11896ab34854a9d42dfd9f93afdd627a375d15a076` (2 replacements) |
+| `tabpfn_classifier_colab_f4ff797_colab-cli-t4_activity_run_summary.json` | `321531b1827cdc3db505e305d7ac96fc6fad8f60a5343732505b94d538468487` | unchanged (no local path) |
+| `tabpfn_classifier_colab_f4ff797_colab-cli-t4_activity_run_copy.ipynb` | `237dd424536a6a75db00172ee07e667b8278ab56897342070ce4de145f8e7ac4` | unchanged (no local path) |
+
 ### Serialization scan of the pinned sample artifact (2026-10-23, retroactive)
 
-ARTIFACT_SPEC 2.0 (ml-worker#90): SER9 (b) for `model.ckpt`, a byte copy of the upstream code-capable checkpoint kept so the bundle can be checked against the pinned upstream identity; SER9 (a) for `model.tabpfn_fit`, TabPFN's own fitted-state format, which has no faithful non-code-executing equivalent. Because `model.ckpt` is a plain tensor state dict, a faithful `safetensors` conversion exists, so under SER9 (b) the next release must publish that conversion beside the byte copy; this asset does not have it yet. Both files need a recorded trust note (SER6: "Artifact contract and trust boundary" in [`tutorials/README.md`](../tutorials/README.md)) and a scan with an acceptable outcome (SER13). SER13 asks for the scan **before** publication; this asset was published on
+ARTIFACT_SPEC 2.0 (ml-worker#90): SER9 (b) for `model.ckpt`, a byte copy of the upstream code-capable checkpoint kept so the bundle can be checked against the pinned upstream identity; SER9 (a) for `model.tabpfn_fit`, TabPFN's own fitted-state format, which has no faithful non-code-executing equivalent. This is the v1 sample, kept as history: its successor, `sample-artifact-synthetic-v2`, is a bundle-format v2 export with `model.safetensors` and no `model.ckpt`, scanned in the next subsection. Both files need a recorded trust note (SER6: "Artifact contract and trust boundary" in [`tutorials/README.md`](../tutorials/README.md)) and a scan with an acceptable outcome (SER13). SER13 asks for the scan **before** publication; this asset was published on
 2026-10-22, before 2.0 existed, so this is a **retroactive** scan of the published bytes, not the pre-publication control. The
 next sample artifact is to be scanned before upload and published only at the digest that passed.
 
@@ -227,6 +398,30 @@ The two joblib files interleave raw numpy bytes with pickle instructions, so pic
   decodes with no format marker, code that is not pickle, and harm through callables picklescan rates safe or
   suspicious are out of scope; review findings inside the scope are fixed, findings outside it are recorded.
 
+### Serialization scan of the v2 sample artifact (2026-10-25)
+
+`sample-artifact-synthetic-v2` is the default pinned sample since the bundle-format v2 change: `model.tabpfn_fit` +
+`model.safetensors` + `artifact_manifest.json`, with no `model.ckpt`, so the only code-capable state is TabPFN's fitted
+state under ARTIFACT_SPEC 2.0 SER9 (a), with the SER6 trust note in [`tutorials/README.md`](../tutorials/README.md).
+The weights are `safetensors` (SER7). This asset was published on 2026-10-24, so this scan is also retroactive.
+
+The release asset `sample-artifact-synthetic-v2/tabpfn_classifier_artifact.zip` was downloaded on 2026-10-25; its SHA-256 (`8828df98a2db8047bc2d52313a5a173bfa499d8b780619899def268dee31b41c`) matches
+the value pinned as `SAMPLE_ARTIFACT_SHA256`. It was scanned with the same `scan.py` as above.
+
+| File | Kind | Verdict |
+|---|---|---|
+| `tabpfn_classifier_artifact.zip` | archive | extracted |
+| `model.tabpfn_fit` | archive | extracted |
+| `model.tabpfn_fit!/fitted_attrs.joblib` | joblib | clean |
+| `model.tabpfn_fit!/executor_state.joblib` | joblib | clean |
+
+- **Result:** 2 pickle files; clean=2 dangerous=0 incomplete=0; `scan_status=0`. Dangerous globals: none.
+  `model.safetensors` is not pickle content, so it gets no verdict.
+- **Globals (distinct, all files):** 40, by top-level package: tabpfn (28), numpy (5), sklearn (5), builtins (1), joblib (1).
+- **Evidence:** `docs/execution-evidence/2026-10-23/ser13-sample-artifact-scan/scan-report-v2.txt`, exactly as `scan.py`
+  wrote it.
+
+
 ### Local lock-only drives (not clean-runtime evidence)
 
 Code cells driven in order by a plain-CPython stand-in kernel on Linux x86_64 (WSL2), CPU only (`CUDA_VISIBLE_DEVICES=-1`), inside each notebook's own isolated hash-locked uv environment (CPython 3.12.12; torch 2.11.0, tabpfn 8.1.0, numpy 2.5.3, pandas 2.3.2, scikit-learn 1.9.0; 63 locked packages), default form values. The checkpoint was copied in from a local checkout and digest-verified (`d0d865d5…`), so the Hub download was not exercised; no notebook kernel, no Colab.
@@ -255,7 +450,9 @@ clean Colab record, are both still required before either notebook is marked rel
 
 ## Current status
 
-**Current status (2026-10-23): Candidate.** The current E2E notebook blob is `e705db6e` (`tutorials/tabpfn_classifier_colab.ipynb`, regenerated from code commit `c6e880b` and recorded at commit `9e69f88` on `fix/refusal-display`: a refused user input — the BYOD table, Section 9 rows, your own Section 10 artifact ZIP or rows — is shown as one `Refused: <file>: <reason>` line with no traceback, names the uploaded file rather than `train.csv`, and Run all stops at that cell; NOTEBOOK_SPEC 3.0 DAT19/DAT20). **Default path covered:** hosted Colab T4 run at `9e69f88` on 2026-10-23 (PASS, 14/14 code cells, 0 errors). **Optional activity covered:** a `RUN_ACTIVITY = True` run copy of the same blob at `9e69f88` on 2026-10-23 (PASS, 14/14 code cells, 0 errors). Both records are under *Recorded executions*. The `197d45b` default-path and optional-activity records cover the previous blob `7d8051f7` and are history, as is the earlier `fcfa6ff` record of blob `d766d7b7` (REL14). The notebook stays **Candidate** pending only these two:
+**Sample artifact v2 (2026-10-24).** The section's default artifact is now the release asset `sample-artifact-synthetic-v2` / `tabpfn_classifier_artifact.zip` (197,034,023 bytes, SHA-256 `8828df98a2db8047bc2d52313a5a173bfa499d8b780619899def268dee31b41c`; GitHub asset digest equal; the release is immutable), the bundle-format v2 re-issue of the v1 asset above (its `reissue` block names `fromReleaseTag` `sample-artifact-synthetic-v1`, `fromZipSha256` `8fe248e2…`, `convertedCheckpointSha256` `f1f5408a…` and code revision `ee79cab`; fitted archive byte-identical). It is not the export of a new hosted run; the producer record stays the `7fce7f9` run (SART8). The v1 tag is unchanged and v1 bundles stay readable (deprecated). Every hosted record below that names `8fe248e2…` ran the v1 pin and is history for the v2-pinned blob (REL14); its hosted default-path and optional-activity runs at `f4ff797` are recorded above, both PASS: Section 10 verified the v2 asset `8828df98…` and loaded it with no v1 `DeprecationWarning`. A local CPU check (not clean-runtime evidence; `CUDA_VISIBLE_DEVICES=-1`, torch 2.11.0+cpu, 2026-10-24) ran the section's own stages (`weights`, then `external_artifact` with `source='pinned'`, `external_reconstruct` and `external_predict`, the last three with `torch.load` patched to raise): the stage downloaded the v2 asset fresh, verified `8828df98…` and the unchanged fitted archive digest, reported `checkpoint_binding: identical to the pinned conversion of the base checkpoint (SHA-256 checked; bundle format v2)`, rebuilt the estimator from the bundle and scored the eight sample rows (same labels; probabilities within 0.0025 of the `f3a35be` hosted record of the v1 pin).
+
+**Current status (2026-10-24): Candidate.** **2026-10-24 (v2 sample artifact by default):** the current E2E notebook blob is `b86763c1` (`tutorials/tabpfn_classifier_colab.ipynb` at `47d11e9`, code commit `ea57226`, branch `chore/sample-artifact-v2-default`): Section 10 now pins `sample-artifact-synthetic-v2` (`tabpfn_classifier_artifact.zip`, 197,034,023 bytes, SHA-256 `8828df98a2db8047bc2d52313a5a173bfa499d8b780619899def268dee31b41c`), the bundle-format v2 re-issue of the recorded `7fce7f9` run's export: `model.safetensors` is the pinned conversion of the base checkpoint, `model.tabpfn_fit` is byte-identical (so `SAMPLE_ARTIFACT_FITTED_SHA256` is unchanged), every other manifest field is unchanged and a `reissue` block records the conversion. It is not the export of a new hosted run. The v1 asset (`sample-artifact-synthetic-v1`, `8fe248e2…`) stays published and readable through the deprecated v1 path. Its hosted default-path run and optional-activity run (`RUN_ACTIVITY = True` run copy) are recorded: Colab CLI `colab exec -f` scripted executions (not a browser Run all) on fresh Colab T4s at commit `f4ff797`, 2026-10-24, both PASS, 14/14 code cells, 0 errors, input unchanged (evidence in `docs/execution-evidence/2026-10-24-f4ff797/` and `docs/execution-evidence/2026-10-24-f4ff797-activity/`). Section 10 verified the pinned v2 asset (`sample-artifact-synthetic-v2`, `8828df98…`, `tabpfn-dimer-classifier-v2`) and loaded it with no v1 `DeprecationWarning`; the run's own v2 export passed the fresh-boundary reload. The runs of `dd694637` are history for this blob (REL14), and it stays **Candidate** pending only REL12 and REL2. A local CPU check (not clean-runtime evidence; `CUDA_VISIBLE_DEVICES=-1`, torch 2.11.0+cpu, 2026-10-24) ran the section's own stages (`weights`, then `external_artifact` with `source='pinned'`, `external_reconstruct` and `external_predict`, the last three with `torch.load` patched to raise): the stage downloaded the v2 asset fresh, verified `8828df98…` and the unchanged fitted archive digest, reported `checkpoint_binding: identical to the pinned conversion of the base checkpoint (SHA-256 checked; bundle format v2)`, rebuilt the estimator from the bundle and scored the eight sample rows (same labels; probabilities within 0.0025 of the `f3a35be` hosted record of the v1 pin). **Before it:** the E2E notebook blob was `dd694637` (`tutorials/tabpfn_classifier_colab.ipynb`, regenerated from code commit `b0154d1` on `fix/bundle-safetensors`: artifact bundles are format v2 with `model.safetensors` and the export is bound to `CONVERTED_SHA256`; the external-artifact section still loaded the v1 sample `sample-artifact-synthetic-v1` through the deprecated `weights_only=True` path, and its v2 re-issue `sample-artifact-synthetic-v2` (SHA-256 `8828df98a2db8047bc2d52313a5a173bfa499d8b780619899def268dee31b41c`) was staged, not yet published. Stacked on `3b451d9` on `fix/serve-safetensors`: the model is served from `tabpfn-v3-classifier-v3_default.safetensors`, converted once from the pinned checkpoint with `weights_only=True` and digest-pinned; it is stacked on `057ab9d`, whose guard refuses a pickle checkpoint load when torch is older than 2.6 or `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD` is set, because tabpfn 8.1.0 loads `.ckpt` files with `weights_only=None`). At commit `f3a35be` (the PR #32 head) its default path and, in a `RUN_ACTIVITY = True` run copy, its optional activity each ran once on a fresh hosted Colab T4 (2026-10-24, PASS, 14/14 code cells, 0 errors; served file `tabpfn-v3-classifier-v3_default.safetensors`, SHA-256 `f1f5408a…b7d2`; the run's export is a v2 bundle with `model.safetensors`; the `f3a35be` records under *Recorded executions*), so the runs of this PR cover the default path and the activity. When this stack merges, the `b12ca85` records of the intermediate blob `020eaa85` (`3b451d9`, PR #31) and the `641152f` records of the intermediate blob `41dc2a68` (`057ab9d`, PR #29) are history, as are the `9e69f88` records of blob `e705db6e`, the `197d45b` records of blob `7d8051f7` and the earlier `fcfa6ff` record of blob `d766d7b7` (REL14). The notebook stays **Candidate** until these two are recorded for the current blob:
 
 - **REL12:** a BYOD run in which one representative input is accepted through the downstream stages and one incompatible input is refused;
 - **REL2:** a browser run of the interactive journeys (BYOD upload dialog, optional-activity toggle, own-artifact ZIP); the scripted CLI runs count for the default path and the activity only.

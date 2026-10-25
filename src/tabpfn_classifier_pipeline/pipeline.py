@@ -4,9 +4,15 @@ Inference-only: the pinned TabPFN-3 classifier checkpoint conditions on the labe
 (``fit`` registers the support set; no gradient update) and scores query rows in a forward pass. The DIMER
 fine-tuning path of this pipeline lives in the private ``tabpfn-classifier-finetuner`` worker and is NOT carried
 here (private code; TabPFN-3 weights are non-commercial). This module owns the pinned snapshot scheme, the input
-contract (DAT24), the ICL fit / predict / evaluate calls, the ``model.tabpfn_fit`` + ``model.ckpt`` +
-``artifact_manifest.json`` bundle the serving path consumes, its pre-load validation, and the evaluation report
+contract (DAT24), the ICL fit / predict / evaluate calls, the ``model.tabpfn_fit`` + ``model.safetensors`` +
+``artifact_manifest.json`` bundle (format v2) the serving path consumes, its pre-load validation, and the evaluation report
 (EVAL21). ``tabpfn`` / ``torch`` are imported lazily inside the functions that need them.
+
+Serving reads only safetensors: ``from_pretrained`` converts the digest-checked pinned ``.ckpt`` once
+(``torch.load(weights_only=True)``) into ``CONVERTED_FILE``, checks it against ``CONVERTED_SHA256``, and the estimator
+is built from that file, which tabpfn 8.1.0 opens with ``safetensors.safe_open`` (no ``torch.load``). Once the
+converted file is in place the source ``.ckpt`` is no longer needed. Bundles carry that file as ``model.safetensors``
+(format v2); v1 bundles (``model.ckpt``) stay readable, ``weights_only=True`` only, with a ``DeprecationWarning``.
 """
 # ruff: noqa: E501  -- contract dictionaries and messages are kept on single lines
 from __future__ import annotations
@@ -14,6 +20,8 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
+import re
 import shutil
 import tempfile
 import zipfile
@@ -25,6 +33,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from . import safetensors_weights as _sw
+
 MODEL_ID = "Prior-Labs/tabpfn_3"
 MODEL_REVISION = "24a16a89d245878b846555110985634aa2e656d7"
 # Non-commercial licence: testing, evaluation and internal benchmarking only (no production deployment).
@@ -35,6 +45,11 @@ MANIFEST_NAME = "dimer-base-manifest.json"
 WEIGHTS_FILE = "tabpfn-v3-classifier-v3_default.ckpt"
 WEIGHTS_SHA256 = "d0d865d54dfbc524f5703104be90620182dca7e5fb2c16de72e9959ea18f3988"
 WEIGHTS_BYTES = 212804803
+# The served file: WEIGHTS_FILE converted by safetensors_weights.convert_checkpoint (tabpfn's own safetensors layout,
+# sorted header). Byte-reproducible; the digest below is what two independent conversions produced.
+CONVERTED_FILE = "tabpfn-v3-classifier-v3_default.safetensors"
+CONVERTED_SHA256 = "f1f5408aeeffdcdfaf4842f0eff072c67ff3fbbb2c29d46d14eb564190d0b7d2"
+CONVERTED_BYTES = 212699804
 MODEL_VERSION = "v3"
 TABPFN_VERSION = "8.1.0"
 
@@ -52,9 +67,12 @@ MAX_ZIP_EXPANDED_BYTES = 512 * 1024 * 1024  # BYOD ZIP expansion ceiling (512 Mi
 MAX_ZIP_RATIO = 200  # compression-bomb guard: expanded / compressed
 DECISION_RULE = "argmax"  # predict() is argmax over predict_proba(); the probabilities are raw ensemble outputs, uncalibrated
 METRIC_IDS = ("accuracy", "balancedAccuracy", "logLoss", "rocAuc")
-ARTIFACT_SCHEMA_VERSION = 1
-FITTED_NAME = "model.tabpfn_fit"
-CHECKPOINT_NAME = "model.ckpt"
+# Bundle format v2 (safetensors_weights): model.safetensors; v1 (model.ckpt) is read-only and deprecated.
+ARTIFACT_SCHEMA_VERSION = _sw.BUNDLE_SCHEMA_VERSION
+LEGACY_ARTIFACT_SCHEMA_VERSION = _sw.LEGACY_BUNDLE_SCHEMA_VERSION
+FITTED_NAME = _sw.FITTED_ESTIMATOR
+CHECKPOINT_NAME = _sw.BUNDLE_CHECKPOINT
+LEGACY_CHECKPOINT_NAME = _sw.LEGACY_BUNDLE_CHECKPOINT
 ARTIFACT_MANIFEST_NAME = "artifact_manifest.json"
 
 
@@ -73,6 +91,25 @@ def sha256_file(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+# tabpfn 8.1.0 reads checkpoints with torch.load and weights_only=None (tabpfn/checkpoint.py:73). That is restricted only because
+# torch >= 2.6 turns None into True; an older torch, or TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD set to a truthy value, makes it a full unpickle.
+_TORCH_TRUTHY = {"1", "y", "yes", "true"}
+_MIN_TORCH = (2, 6)
+
+
+def require_weights_only_load(torch_version: str | None = None) -> None:
+    """Refuse to continue unless a TabPFN checkpoint would load with weights_only=True. ``torch_version`` is for tests."""
+    if os.environ.get("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "").strip().lower() in _TORCH_TRUTHY:
+        raise RuntimeError("Refusing to load a TabPFN checkpoint: TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD is set, which would make torch.load unpickle it without weights_only; unset it.")
+    if torch_version is None:
+        import torch
+
+        torch_version = torch.__version__
+    match = re.match(r"(\d+)\.(\d+)", torch_version)
+    if match is None or (int(match[1]), int(match[2])) < _MIN_TORCH:
+        raise RuntimeError(f"Refusing to load a TabPFN checkpoint: torch {torch_version} is older than 2.6, so torch.load would not default to weights_only=True; install torch>=2.6.")
+
+
 def _read_manifest(root: Path) -> dict[str, Any]:
     manifest_path = root / MANIFEST_NAME
     if not manifest_path.is_file():
@@ -85,12 +122,16 @@ def _read_manifest(root: Path) -> dict[str, Any]:
     return manifest
 
 
-def verify_snapshot(weights_dir: str | Path | None = None) -> dict[str, Any]:
-    """Re-hash every manifest entry under ``weights_dir``; raise on any missing file, size or digest mismatch."""
+def verify_snapshot(weights_dir: str | Path | None = None, *, require_checkpoint: bool = True) -> dict[str, Any]:
+    """Re-hash every manifest entry under ``weights_dir``; raise on any missing file, size or digest mismatch.
+
+    ``require_checkpoint=False`` skips the source ``.ckpt`` (used once the verified conversion is in place)."""
     root = Path(weights_dir or DEFAULT_WEIGHTS_DIR)
     manifest = _read_manifest(root)
-    checkpoint_ok = False
+    checkpoint_ok = not require_checkpoint
     for entry in manifest["files"]:
+        if not require_checkpoint and entry["path"] == WEIGHTS_FILE:
+            continue
         path = root / entry["path"]
         if not path.is_file():
             raise FileNotFoundError(f"snapshot file missing: {path}")
@@ -107,11 +148,11 @@ def verify_snapshot(weights_dir: str | Path | None = None) -> dict[str, Any]:
     return manifest
 
 
-def stage_missing_files(weights_dir: str | Path | None = None, *, allow_download: bool = False, downloader: Callable[..., Any] | None = None) -> list[str]:
+def stage_missing_files(weights_dir: str | Path | None = None, *, allow_download: bool = False, downloader: Callable[..., Any] | None = None, skip: Sequence[str] = ()) -> list[str]:
     """Fetch the manifest entries absent from ``weights_dir`` (revision-pinned, never ``main``); refuse without ``allow_download``."""
     root = Path(weights_dir or DEFAULT_WEIGHTS_DIR)
     manifest = _read_manifest(root)
-    missing = [entry["path"] for entry in manifest["files"] if not (root / entry["path"]).is_file()]
+    missing = [entry["path"] for entry in manifest["files"] if entry["path"] not in skip and not (root / entry["path"]).is_file()]
     if not missing:
         return []
     if not allow_download:
@@ -125,6 +166,32 @@ def stage_missing_files(weights_dir: str | Path | None = None, *, allow_download
         if not (root / rel).is_file():
             raise FileNotFoundError(f"download did not produce {root / rel}")
     return missing
+
+
+def converted_is_verified(weights_dir: str | Path | None = None) -> bool:
+    """Whether ``CONVERTED_FILE`` is present under ``weights_dir`` with the pinned size and SHA-256."""
+    target = Path(weights_dir or DEFAULT_WEIGHTS_DIR) / CONVERTED_FILE
+    return target.is_file() and target.stat().st_size == CONVERTED_BYTES and _sw.sha256_file(target) == CONVERTED_SHA256
+
+
+def pinned_checkpoint_sha256(layout: int) -> str:
+    """The checkpoint digest a pretrained (zero-shot) bundle must carry: the conversion for v2, the source for v1."""
+    return CONVERTED_SHA256 if layout == ARTIFACT_SCHEMA_VERSION else WEIGHTS_SHA256
+
+
+def ensure_converted(weights_dir: str | Path | None = None) -> Path:
+    """Return the verified ``CONVERTED_FILE`` under ``weights_dir``, converting the pinned checkpoint once if it is absent.
+
+    An existing file is used only when its size and SHA-256 match the pins; otherwise the source ``.ckpt`` (re-hashed
+    against ``WEIGHTS_SHA256``) is read with ``torch.load(weights_only=True)`` and the result must equal
+    ``CONVERTED_SHA256`` before it is moved into place."""
+    root = Path(weights_dir or DEFAULT_WEIGHTS_DIR)
+    target = root / CONVERTED_FILE
+    if converted_is_verified(root):
+        return target
+    require_weights_only_load()
+    _sw.convert_checkpoint(root / WEIGHTS_FILE, target, expected_sha256=WEIGHTS_SHA256, source_name=WEIGHTS_FILE, expected_converted_sha256=CONVERTED_SHA256)
+    return target
 
 
 # --------------------------------------------------------------------------- datasets
@@ -401,15 +468,26 @@ def manifest_digest(manifest: dict[str, Any], key: str) -> str:
     return value
 
 
-def validate_artifact_bundle(artifact_dir: str | Path, *, expected_fitted_sha256: str = "", expected_checkpoint_sha256: str = "") -> dict[str, Any]:
-    """Check manifest schema, member names, sizes, digests and archive safety BEFORE any model state is deserialised."""
+def validate_artifact_bundle(artifact_dir: str | Path, *, expected_fitted_sha256: str = "", expected_checkpoint_sha256: str = "", pinned_base: bool = False) -> dict[str, Any]:
+    """Check manifest layout, member names, sizes, digests and archive safety BEFORE any model state is deserialised.
+
+    The layout (v2 ``model.safetensors`` or deprecated v1 ``model.ckpt``) is decided from the manifest alone; a mixed or
+    unknown layout is refused before any other file is opened. ``pinned_base`` binds the checkpoint to the pinned base
+    for its layout (``pinned_checkpoint_sha256``)."""
     root = Path(artifact_dir)
     manifest_path = root / ARTIFACT_MANIFEST_NAME
     if not manifest_path.is_file():
         raise FileNotFoundError(f"{ARTIFACT_MANIFEST_NAME} missing in {root}")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("schemaVersion") != ARTIFACT_SCHEMA_VERSION or manifest.get("taskType") != TASK_TYPE:
-        raise ValueError(f"unsupported manifest: schemaVersion={manifest.get('schemaVersion')} taskType={manifest.get('taskType')}")
+    if manifest.get("taskType") != TASK_TYPE:
+        raise ValueError(f"unsupported manifest: taskType={manifest.get('taskType')}")
+    layout = _sw.check_bundle_layout(manifest)
+    _sw.check_bundle_files(root, layout)
+    if pinned_base:
+        pinned = pinned_checkpoint_sha256(layout)
+        if expected_checkpoint_sha256 and expected_checkpoint_sha256.strip().lower() != pinned:
+            raise ValueError("expected_checkpoint_sha256 disagrees with the pinned base for this bundle layout")
+        expected_checkpoint_sha256 = pinned
     for key in ("targetColumn", "featureColumns", "classes"):
         if key not in manifest:
             raise ValueError(f"manifest lacks {key}")
@@ -426,9 +504,11 @@ def validate_artifact_bundle(artifact_dir: str | Path, *, expected_fitted_sha256
             raise ValueError(f"{name} SHA-256 {digest} != manifest {manifest_digest(manifest, key)}")
         if override and digest != override.strip().lower():
             raise ValueError(f"{name} SHA-256 {digest} != expected {override.strip().lower()}")
+        if key == "foundationCheckpoint" and layout == ARTIFACT_SCHEMA_VERSION and path.stat().st_size != manifest["foundationCheckpointBytes"]:
+            raise ValueError(f"{name} is {path.stat().st_size} bytes != manifest foundationCheckpointBytes {manifest['foundationCheckpointBytes']}")
         digests[key] = digest
     init_params = _safe_fitted_archive(root / manifest["fittedEstimator"])
-    return {**manifest, "verifiedSha256": digests, "recordedModelPath": init_params.get("model_path")}
+    return {**manifest, "verifiedSha256": digests, "recordedModelPath": init_params.get("model_path"), "layout": layout}
 
 
 def rewrite_model_path(fitted_archive: Path, checkpoint: Path, destination: Path) -> Path:
@@ -457,16 +537,17 @@ def rewrite_model_path(fitted_archive: Path, checkpoint: Path, destination: Path
 
 
 def zip_artifact_bundle(artifact_dir: str | Path, zip_path: str | Path) -> str:
-    """Zip the three bundle members flat (bare names) for transport; returns the ZIP SHA-256.
+    """Zip the three bundle members (manifest, fitted archive, the layout's checkpoint) flat for transport; returns the ZIP SHA-256.
 
     Deterministic: members in sorted order, each with a fixed timestamp (1980-01-01 00:00:00) and mode 0644, so the same
     member bytes always give the same ZIP digest. The ZIP is written to a temporary file and moved into place atomically.
     """
     root, zip_path = Path(artifact_dir), Path(zip_path)
+    layout = _sw.check_bundle_layout(json.loads((root / ARTIFACT_MANIFEST_NAME).read_text(encoding="utf-8")))
     zip_path.parent.mkdir(parents=True, exist_ok=True)
     partial = zip_path.with_name(zip_path.name + ".part")
     with zipfile.ZipFile(partial, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for name in sorted((ARTIFACT_MANIFEST_NAME, FITTED_NAME, CHECKPOINT_NAME)):
+        for name in sorted((ARTIFACT_MANIFEST_NAME, FITTED_NAME, _sw.bundle_checkpoint_name(layout))):
             info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o100644 << 16
@@ -490,7 +571,11 @@ def _coerce_non_json_init_params(model: Any) -> None:
 
 @dataclass
 class TabPFNClassifierPipeline:
-    """The verified TabPFN-3 checkpoint plus, after ``fit`` or ``from_artifact``, an in-context-fitted estimator."""
+    """The verified TabPFN-3 weights plus, after ``fit`` or ``from_artifact``, an in-context-fitted estimator.
+
+    ``weights_path`` is the safetensors file the estimator loads (``CONVERTED_FILE`` from ``from_pretrained``; a v2
+    artifact's ``model.safetensors`` from ``from_artifact``). ``save_artifact`` copies it into the bundle. A v1 artifact
+    has no such file (``weights_path`` is its ``model.ckpt``) and cannot be re-exported."""
 
     weights_path: Path
     device: str = "cpu"
@@ -505,15 +590,21 @@ class TabPFNClassifierPipeline:
     @classmethod
     def from_pretrained(cls, device: str | None = None, weights_dir: str | Path | None = None, allow_download: bool = False, *, n_estimators: int = DEFAULT_N_ESTIMATORS, random_state: int = DEFAULT_SEED) -> TabPFNClassifierPipeline:
         root = Path(weights_dir or DEFAULT_WEIGHTS_DIR)
-        stage_missing_files(root, allow_download=allow_download)
-        verify_snapshot(root)
+        if converted_is_verified(root):  # the source .ckpt is only needed for the one-time conversion
+            stage_missing_files(root, allow_download=allow_download, skip=(WEIGHTS_FILE,))
+            verify_snapshot(root, require_checkpoint=False)
+        else:
+            stage_missing_files(root, allow_download=allow_download)
+            verify_snapshot(root)
+        converted = ensure_converted(root)
         if device is None:
             import torch
 
             device = "cuda" if torch.cuda.is_available() else "cpu"
-        return cls(weights_path=root / WEIGHTS_FILE, device=device, n_estimators=n_estimators, random_state=random_state)
+        return cls(weights_path=converted, device=device, n_estimators=n_estimators, random_state=random_state)
 
     def _build_estimator(self) -> Any:
+        require_weights_only_load()
         from tabpfn import TabPFNClassifier
 
         return TabPFNClassifier(model_path=str(self.weights_path), device=self.device, n_estimators=self.n_estimators, random_state=self.random_state, show_progress_bar=False)
@@ -556,8 +647,11 @@ class TabPFNClassifierPipeline:
         return classification_metrics(list(y), predicted, proba, classes)
 
     def save_artifact(self, artifact_dir: str | Path, *, saver: Callable[[Any, Path], None] | None = None) -> dict[str, Any]:
-        """Write ``model.tabpfn_fit`` + ``model.ckpt`` (byte copy of the verified checkpoint) + ``artifact_manifest.json``."""
+        """Write a v2 bundle: ``model.tabpfn_fit`` + ``model.safetensors`` (copy of the served safetensors weights) + ``artifact_manifest.json``."""
         model = self._require()
+        checkpoint = Path(self.weights_path)
+        if checkpoint.suffix != ".safetensors":
+            raise ValueError(f"a v2 bundle carries {CHECKPOINT_NAME}; {checkpoint.name} is not a safetensors file (a v1 artifact cannot be re-exported)")
         root = Path(artifact_dir)
         root.mkdir(parents=True, exist_ok=True)
         if saver is None:
@@ -568,19 +662,16 @@ class TabPFNClassifierPipeline:
                 save_fitted_tabpfn_model(estimator, path)
 
         saver(model, root / FITTED_NAME)
-        shutil.copyfile(self.weights_path, root / CHECKPOINT_NAME)
+        shutil.copyfile(checkpoint, root / CHECKPOINT_NAME)
         manifest = {
-            "schemaVersion": ARTIFACT_SCHEMA_VERSION,
             "taskType": TASK_TYPE,
             "targetColumn": self.target_column,
             "featureColumns": list(self.feature_columns or []),
             "classes": list(self.classes or []),
-            "fittedEstimator": FITTED_NAME,
-            "foundationCheckpoint": CHECKPOINT_NAME,
+            **_sw.v2_manifest_fields(TASK_TYPE, sha256_file(root / CHECKPOINT_NAME), (root / CHECKPOINT_NAME).stat().st_size),
             "fittedEstimatorSha256": sha256_file(root / FITTED_NAME),
-            "foundationCheckpointSha256": sha256_file(root / CHECKPOINT_NAME),
             "portableLoader": "tabpfn_classifier_pipeline.TabPFNClassifierPipeline.from_artifact",
-            "baseModel": {"modelId": MODEL_ID, "revision": MODEL_REVISION, "file": WEIGHTS_FILE, "sha256": WEIGHTS_SHA256, "modelVersion": MODEL_VERSION, "license": MODEL_LICENSE},
+            "baseModel": {"modelId": MODEL_ID, "revision": MODEL_REVISION, "file": WEIGHTS_FILE, "sha256": WEIGHTS_SHA256, "convertedFile": CONVERTED_FILE, "convertedSha256": CONVERTED_SHA256, "modelVersion": MODEL_VERSION, "license": MODEL_LICENSE},
             "mode": "zero-shot-icl",
             "nEstimators": self.n_estimators,
             "randomState": self.random_state,
@@ -589,15 +680,20 @@ class TabPFNClassifierPipeline:
         return manifest
 
     @classmethod
-    def from_artifact(cls, artifact_dir: str | Path, device: str | None = None, *, expected_fitted_sha256: str = "", expected_checkpoint_sha256: str = "", loader: Callable[[Path, str], Any] | None = None) -> TabPFNClassifierPipeline:
-        """Validate the bundle, then reconstruct the estimator from the fitted archive + companion checkpoint (no refit, no download)."""
+    def from_artifact(cls, artifact_dir: str | Path, device: str | None = None, *, expected_fitted_sha256: str = "", expected_checkpoint_sha256: str = "", pinned_base: bool = False, loader: Callable[[Path, str], Any] | None = None) -> TabPFNClassifierPipeline:
+        """Validate the bundle, then reconstruct the estimator from the fitted archive + companion weights (no refit, no download).
+
+        v2: the fitted archive's ``model_path`` is pointed at ``model.safetensors``. v1 (deprecated): ``model.ckpt`` is read
+        with ``torch.load(weights_only=True)`` into a temporary safetensors file, with a ``DeprecationWarning``; tabpfn
+        never unpickles a checkpoint on either path."""
         root = Path(artifact_dir)
-        manifest = validate_artifact_bundle(root, expected_fitted_sha256=expected_fitted_sha256, expected_checkpoint_sha256=expected_checkpoint_sha256)
+        manifest = validate_artifact_bundle(root, expected_fitted_sha256=expected_fitted_sha256, expected_checkpoint_sha256=expected_checkpoint_sha256, pinned_base=pinned_base)
         if device is None:
             import torch
 
             device = "cuda" if torch.cuda.is_available() else "cpu"
         if loader is None:
+            require_weights_only_load()
             from tabpfn.model_loading import load_fitted_tabpfn_model
 
             def loader(fitted: Path, dev: str) -> Any:
@@ -605,7 +701,12 @@ class TabPFNClassifierPipeline:
 
         checkpoint = root / manifest["foundationCheckpoint"]
         with tempfile.TemporaryDirectory() as temp_dir:
-            rewritten = rewrite_model_path(root / manifest["fittedEstimator"], checkpoint, Path(temp_dir) / FITTED_NAME)
+            weights = checkpoint
+            if manifest["layout"] == LEGACY_ARTIFACT_SCHEMA_VERSION:
+                require_weights_only_load()
+                weights = Path(temp_dir) / "legacy-v1.safetensors"
+                _sw.legacy_checkpoint_to_safetensors(checkpoint, weights, expected_sha256=manifest["verifiedSha256"]["foundationCheckpoint"])
+            rewritten = rewrite_model_path(root / manifest["fittedEstimator"], weights, Path(temp_dir) / FITTED_NAME)
             model = loader(rewritten, device)
         classes = [str(c) for c in getattr(model, "classes_", manifest["classes"])]
         if classes != [str(c) for c in manifest["classes"]]:

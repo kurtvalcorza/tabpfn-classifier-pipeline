@@ -46,7 +46,7 @@ ENVIRONMENT = {
     "package": "tabpfn_classifier_pipeline",
     "repo_name": REPO,
     "weights_key": "tabpfn-3-classifier",
-    "modules": ["__init__.py", "pipeline.py"],
+    "modules": ["__init__.py", "pipeline.py", "safetensors_weights.py"],
     "entry_module": "pipeline.py",
     "lock": "tutorials/requirements-colab.lock.txt",
     "managed_python": "3.12.12",
@@ -60,7 +60,7 @@ ENVIRONMENT = {
 RUNTIME_PREREQ = (
     "- **Runtime:** a fresh **Linux x86_64** runtime — Google Colab (CPU is enough for the default sample; a T4 GPU is used automatically when present), Kaggle or a Linux Jupyter kernel. The kernel's own Python version does not matter: the notebook installs nothing into it, and runs every stage with CPython 3.12.12 in an isolated environment built from {n_locked} hash-locked packages (`tabpfn` 8.1.0, `torch` 2.11.0 with its CUDA libraries, `numpy` 2.5.3, `pandas` 2.3.2, `scikit-learn` 1.9.0). About 0.3 GB of disk is needed for the checkpoint and about 8 GB for the isolated environment."
 )
-LICENCE_PREREQ = "- **Licence:** the TabPFN-3 weights are non-commercial (`tabpfn-3-license-v1.0`): testing, evaluation and internal benchmarking only. A bundle carries a byte copy of the checkpoint, so the same terms travel with it. Clear the licence before any production use. No credentials are needed: `Prior-Labs/tabpfn_3` is public and not access-gated."
+LICENCE_PREREQ = "- **Licence:** the TabPFN-3 weights are non-commercial (`tabpfn-3-license-v1.0`): testing, evaluation and internal benchmarking only. A bundle carries the weights (as `model.safetensors`), so the same terms travel with it. Clear the licence before any production use. No credentials are needed: `Prior-Labs/tabpfn_3` is public and not access-gated."
 
 TEMPLATE = {
     **ENVIRONMENT,
@@ -79,7 +79,7 @@ TEMPLATE = {
     ),
     "title": "TabPFN-3 Classifier — DIMER E2E tabular classification tutorial (standalone)",
     "badges": BADGES,
-    "capability": "supervised tabular classification by **in-context learning** with the pinned `Prior-Labs/tabpfn_3` classifier checkpoint: validated support rows, no gradient update, evaluation against trivial and classical baselines, an `argmax` decision over uncalibrated class probabilities, and a `model.tabpfn_fit` + `model.ckpt` + `artifact_manifest.json` bundle reloaded in a fresh process",
+    "capability": "supervised tabular classification by **in-context learning** with the pinned `Prior-Labs/tabpfn_3` classifier checkpoint: validated support rows, no gradient update, evaluation against trivial and classical baselines, an `argmax` decision over uncalibrated class probabilities, and a `model.tabpfn_fit` + `model.safetensors` + `artifact_manifest.json` bundle reloaded in a fresh process",
     "intro": (
         "TabPFN-3 is a Transformer trained on a prior over synthetic tabular tasks so that it performs supervised "
         "classification in a single forward pass: `fit` registers your labelled training rows as the in-context "
@@ -122,7 +122,7 @@ TEMPLATE = {
     "prerequisites": [
         RUNTIME_PREREQ,
         "- **Knowledge:** basic Python and pandas, the train/val/test convention, and how to read a printed dictionary. The metrics and in-context learning are explained where they are first used, and the glossary collects them.",
-        "- **Model file:** `tabpfn-v3-classifier-v3_default.ckpt` (203 MiB) plus the licence, README and config of the snapshot, staged at a fixed revision and digest-verified in Section 3.",
+        "- **Model file:** `tabpfn-v3-classifier-v3_default.ckpt` (203 MiB) plus the licence, README and config of the snapshot, staged at a fixed revision and digest-verified in Section 3, then converted once (read with `weights_only=True`) to `tabpfn-v3-classifier-v3_default.safetensors`, whose pinned digest is checked. The model is served from the safetensors file, and the artifact carries it as `model.safetensors`; the `.ckpt` is only read once, for the conversion.",
         "- **Data:** the default path draws a deterministic synthetic 3-class table (600 rows, 12 numeric features, `train.csv`/`val.csv`/`test.csv`, plus a `record_id` identifier and a `category` column derived from the row index, both dropped from the features) in code and needs no download and no private data. BYOD (one labelled ZIP, `train.csv` or directory) is off by default. Do not upload confidential or restricted data to a hosted notebook environment unless you are authorized to do so. Uploaded inputs remain in the notebook runtime; this pipeline does not send them to a third-party inference API.",
         LICENCE_PREREQ,
     ],
@@ -201,8 +201,8 @@ TEMPLATE = {
                 "| **Log loss** | Average negative log probability of the true class; lower is better; punishes confident mistakes. |\n"
                 "| **ROC-AUC (one-vs-rest)** | Ranking quality, threshold-free, averaged over one-class-vs-rest problems. |\n"
                 "| **Uncalibrated probability** | A score not guaranteed to match observed frequencies. |\n"
-                "| **Fitted archive (`model.tabpfn_fit`)** | The fitted estimator state without the foundation weights. |\n"
-                "| **Foundation checkpoint (`model.ckpt`)** | A byte copy of the pinned TabPFN-3 checkpoint, bound by its SHA-256. |\n"
+                "| **Fitted archive (`model.tabpfn_fit`)** | The fitted estimator state without the foundation weights. Code-capable (ARTIFACT_SPEC SER9): loading it unpickles its joblib state; trust it only as far as the digest that pins it. |\n"
+                "| **Foundation weights (`model.safetensors`)** | The pinned TabPFN-3 weights as safetensors (no code), bound by their SHA-256. A deprecated v1 artifact carries a pickle `model.ckpt` instead. |\n"
                 "| **Digest (SHA-256)** | A fingerprint of a file's bytes. |\n"
                 "| **Hash-locked environment / stage** | The isolated Python environment every stage runs in; one workflow step run as its own process. |\n"
                 "| **BYOD** | Bring Your Own Data. |\n\n"
@@ -356,7 +356,7 @@ TEMPLATE = {
             "md": (
                 "## 8. Export the artifact bundle and verify it in a fresh process · [Engineering]\n\n"
                 "`save_artifact` writes `model.tabpfn_fit` (the fitted estimator state, without the foundation weights), "
-                "`model.ckpt` (a byte copy of the verified checkpoint) and `artifact_manifest.json` (target and feature columns, "
+                "`model.safetensors` (a copy of the verified safetensors weights; bundle format v2) and `artifact_manifest.json` (target and feature columns, "
                 "classes, both SHA-256 digests, the base-model identity, the ensemble settings, and the feature kinds a "
                 "loader uses to refuse text in numeric columns); `zip_artifact_bundle` writes "
                 "`outputs/{stem}_artifact.zip` deterministically (sorted members, fixed timestamps), so the same members always "
@@ -466,21 +466,26 @@ TEMPLATE = {
                 "Sections 4–9 created, so if you already hold a compatible artifact you can run Sections 1–3 and then this section "
                 "alone. Its outputs go to `outputs/external_artifact/`, apart from the main path's files.\n\n"
                 "**The pinned sample artifact.** By default the `external_artifact` stage downloads `{stem}_artifact.zip` (197 MB: "
-                "`artifact_manifest.json`, `model.tabpfn_fit` and `model.ckpt`) from this repository's GitHub release "
-                "`sample-artifact-synthetic-v1` (no account or token). It is the export of a recorded hosted T4 run of this "
-                "notebook's default path (the synthetic sample) at commit `7fce7f9`; the release notes name the run record, and the "
-                "asset is never replaced (a changed artifact gets a new tag). The stage prints the URL, the pinned ZIP and "
+                "`artifact_manifest.json`, `model.tabpfn_fit` and `model.safetensors`: bundle format v2) from this repository's GitHub release "
+                "`sample-artifact-synthetic-v2` (no account or token). It is the bundle-format-v2 re-issue of the export of a recorded "
+                "hosted T4 run of this notebook's default path (the synthetic sample) at commit `7fce7f9` (release "
+                "`sample-artifact-synthetic-v1`): the weights are the pinned safetensors conversion, `model.tabpfn_fit` is "
+                "byte-identical, every other manifest field is unchanged, and a `reissue` block records the conversion. It is not "
+                "the export of a new run. The release notes name the run record, and the asset is never replaced (a changed artifact gets a new tag). The stage prints the URL, the pinned ZIP and "
                 "fitted-archive digests, the producer and the format **before** it downloads anything, then refuses the file "
                 "unless its SHA-256 equals the pinned value. Only then does it check that the ZIP holds exactly the three members "
                 "at the top level, copy them one by one with `safe_extract_zip` (no absolute paths, `..`, or oversize archives), "
                 "check the manifest, the sizes and the digests with `validate_artifact_bundle` (the fitted archive must equal the "
-                "pinned digest and `model.ckpt` the pinned TabPFN-3 checkpoint), check the base-model identity, and require the "
+                "pinned digest, and the weights the pinned TabPFN-3 weights for the bundle's format), check the base-model identity, and require the "
                 "manifest's features, target, classes and feature kinds to equal the synthetic default path's. Any failed check "
                 "stops the run, and no prediction file is written.\n\n"
-                "**Trust boundary.** `model.tabpfn_fit` is deserialised by `tabpfn`, and `model.ckpt` is a PyTorch checkpoint; both "
-                "can carry code, so loading an artifact means trusting its producer. The pinned SHA-256 binds this download to the "
-                "file the maintainer published, and `model.ckpt` must also be, byte for byte, the checkpoint whose digest Section 3 "
-                "verified. Nothing is deserialised before these checks pass. For an artifact of your own, the only binding is a "
+                "**Trust boundary.** `model.tabpfn_fit` is code-capable (ARTIFACT_SPEC SER9): `tabpfn` reloads it by unpickling its "
+                "joblib state (`fitted_attrs.joblib`, `executor_state.joblib`). It is trusted only as far as the digest that pins it "
+                "(`SAMPLE_ARTIFACT_SHA256` and `SAMPLE_ARTIFACT_FITTED_SHA256` for the sample, `EXPECTED_ZIP_SHA256` for your own), so "
+                "loading an artifact means trusting its producer. The weights cannot: a v2 artifact's `model.safetensors` holds tensors only, and a v1 "
+                "`model.ckpt` is read only with `torch.load(weights_only=True)`, with a deprecation warning. The pinned SHA-256 binds "
+                "this download to the file the maintainer published, and the weights must also be, byte for byte, the pinned "
+                "TabPFN-3 weights (Section 3). Nothing is deserialised before these checks pass. For an artifact of your own, the only binding is a "
                 "digest you received from its producer through a separate channel (`EXPECTED_ZIP_SHA256`).\n\n"
                 "**Optional: your own artifact (off by default).** Set `ARTIFACT_SOURCE` to `My own artifact ZIP` and give "
                 "`ARTIFACT_ZIP_PATH` (or leave it empty in Colab to upload) and the producer's `EXPECTED_ZIP_SHA256`. Without a "
@@ -524,7 +529,7 @@ TEMPLATE = {
             "md": (
                 "**Reconstruct serving state locally.** The `external_reconstruct` stage rebuilds the classifier from the "
                 "artifact's files alone, in a new process, with `from_artifact`: the fitted archive (which holds the support rows "
-                "and the fitted preprocessing) is pointed at the artifact's own verified `model.ckpt`. Nothing is refitted from "
+                "and the fitted preprocessing) is pointed at the artifact's own verified weights. Nothing is refitted from "
                 "the rows you are about to score, and nothing is downloaded."
             ),
             "code": "run_stage('external_reconstruct')",
