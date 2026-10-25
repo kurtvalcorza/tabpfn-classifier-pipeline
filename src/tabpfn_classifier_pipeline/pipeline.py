@@ -792,8 +792,15 @@ class TabPFNClassifierPipeline:
 
     def save_artifact(self, artifact_dir: str | Path, *, saver: Callable[[Any, Path], None] | None = None, converter: Callable[[Path, Path], dict[str, Any]] | None = None) -> dict[str, Any]:
         """Write ``model.tabpfn_fit`` + ``model.ckpt`` (byte copy of the verified checkpoint) + ``model.safetensors`` (its
-        faithful conversion, proven tensor by tensor before the manifest is written) + ``artifact_manifest.json``."""
+        faithful conversion, proven tensor by tensor before the manifest is written) + ``artifact_manifest.json``.
+
+        The copy and the conversion start from ``weights_path``, the authentic foundation checkpoint (a reloaded bundle's
+        digest-checked ``model.ckpt``, never its ``model.safetensors``); it must be the pinned upstream file."""
         model = self._require()
+        checkpoint = Path(self.weights_path)
+        digest = sha256_file(checkpoint)
+        if digest != WEIGHTS_SHA256:
+            raise ValueError(f"refusing to export: foundation checkpoint {checkpoint} has SHA-256 {digest}, not the pinned {WEIGHTS_FILE} ({WEIGHTS_SHA256}); {CHECKPOINT_NAME} must be a byte copy of the pinned upstream checkpoint (ARTIFACT_SPEC SER9 (b))")
         root = Path(artifact_dir)
         root.mkdir(parents=True, exist_ok=True)
         if saver is None:
@@ -804,7 +811,7 @@ class TabPFNClassifierPipeline:
                 save_fitted_tabpfn_model(estimator, path)
 
         saver(model, root / FITTED_NAME)
-        shutil.copyfile(self.weights_path, root / CHECKPOINT_NAME)
+        shutil.copyfile(checkpoint, root / CHECKPOINT_NAME)
         checkpoint_sha256 = sha256_file(root / CHECKPOINT_NAME)
         conversion = (converter or convert_checkpoint_to_safetensors)(root / CHECKPOINT_NAME, root / SAFETENSORS_NAME)
         safetensors_sha256 = sha256_file(root / SAFETENSORS_NAME)

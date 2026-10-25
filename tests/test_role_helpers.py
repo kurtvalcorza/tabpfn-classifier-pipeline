@@ -289,3 +289,111 @@ def test_baseline_and_evaluation_report() -> None:
     assert report["baselines"]["majority_class"]["majorityClass"] == "x" and report["adaptation"].startswith("in-context")
     empty = api.evaluation_report(None, n_validation=0)
     assert empty["verdict"] == "not-measurable" and empty["metrics"] == [] and "needs" in empty
+
+
+# --------------------------------------------------------------------------- re-export (ARTIFACT_SPEC 2.0 SER9 (b))
+
+
+def legacy_loader(fitted: Path, device: str) -> FakeClassifier:
+    """``fake_loader`` for a pre-conversion bundle, whose weights come from the digest-checked ``model.ckpt``."""
+    with zipfile.ZipFile(fitted) as archive:
+        params = json.loads(archive.read("init_params.json"))
+        state = json.loads(archive.read("fitted_attrs.joblib").decode("utf-8").rstrip("x"))
+    assert Path(params["model_path"]).name == api.CHECKPOINT_NAME
+    model = FakeClassifier()
+    model.classes_ = np.asarray(state["classes"])
+    model._freq = np.asarray(state["freq"], dtype=float)
+    return model
+
+
+def pin_checkpoint(monkeypatch: pytest.MonkeyPatch, checkpoint: Path) -> None:
+    """Test seam: treat ``checkpoint`` as the pinned upstream file (``save_artifact`` refuses any other)."""
+    monkeypatch.setattr(api, "WEIGHTS_SHA256", api.sha256_file(checkpoint))
+
+
+def _legacy(art: Path) -> Path:
+    """Turn ``art`` into a pre-conversion bundle like the pinned v1 sample: no ``model.safetensors``."""
+    path = art / api.ARTIFACT_MANIFEST_NAME
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    for key in ("safetensorsWeights", "safetensorsWeightsSha256", "safetensorsConversion"):
+        manifest.pop(key)
+    path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    (art / api.SAFETENSORS_NAME).unlink()
+    return art
+
+
+def _exported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, checkpoint: Path | None = None, converter=fake_converter) -> Path:
+    if checkpoint is None:
+        checkpoint = tmp_path / "upstream.ckpt"
+        checkpoint.write_bytes(b"c" * 4096)
+    pin_checkpoint(monkeypatch, checkpoint)
+    train, _ = _frames()
+    features = ["f1", "f2", "f3", "cat"]
+    pipe = api.TabPFNClassifierPipeline(weights_path=checkpoint).fit(train[features], train["target"], estimator_factory=FakeClassifier)
+    art = tmp_path / "artifact"
+    pipe.save_artifact(art, saver=fake_saver, converter=converter)
+    return art
+
+
+def test_a_reloaded_bundle_reexports_the_authentic_checkpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    art = _exported(tmp_path, monkeypatch)
+    reloaded = api.TabPFNClassifierPipeline.from_artifact(art, device="cpu", loader=fake_loader)
+    again = tmp_path / "again"
+    manifest = reloaded.save_artifact(again, saver=fake_saver, converter=fake_converter)
+    assert api.sha256_file(again / api.CHECKPOINT_NAME) == api.sha256_file(art / api.CHECKPOINT_NAME) == api.WEIGHTS_SHA256
+    assert (again / api.SAFETENSORS_NAME).read_bytes() == (art / api.SAFETENSORS_NAME).read_bytes()
+    assert manifest["foundationCheckpointSha256"] == api.WEIGHTS_SHA256
+    api.validate_artifact_bundle(again)
+    assert reloaded.weights_path == art / api.CHECKPOINT_NAME
+
+
+def test_a_reloaded_legacy_bundle_reexports_its_checkpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    legacy = _legacy(_exported(tmp_path, monkeypatch))
+    with pytest.raises(ValueError, match="safetensorsWeights"):
+        api.TabPFNClassifierPipeline.from_artifact(legacy, device="cpu", loader=legacy_loader)
+    reloaded = api.TabPFNClassifierPipeline.from_artifact(legacy, device="cpu", loader=legacy_loader, require_safetensors=False)
+    again = tmp_path / "again"
+    reloaded.save_artifact(again, saver=fake_saver, converter=fake_converter)
+    assert api.sha256_file(again / api.CHECKPOINT_NAME) == api.sha256_file(legacy / api.CHECKPOINT_NAME) == api.WEIGHTS_SHA256
+    api.validate_artifact_bundle(again)  # the re-export is a full SER9 (b) bundle
+    assert reloaded.weights_path == legacy / api.CHECKPOINT_NAME
+
+
+def test_export_refuses_a_checkpoint_that_is_not_the_pinned_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    art = _exported(tmp_path, monkeypatch)
+    other = tmp_path / "other.ckpt"
+    other.write_bytes(b"d" * 4096)
+    train, _ = _frames()
+    features = ["f1", "f2", "f3", "cat"]
+    pipe = api.TabPFNClassifierPipeline(weights_path=other).fit(train[features], train["target"], estimator_factory=FakeClassifier)
+    with pytest.raises(ValueError, match="not the pinned"):
+        pipe.save_artifact(tmp_path / "fresh", saver=fake_saver, converter=fake_converter)
+    assert not (tmp_path / "fresh").exists()
+    reloaded = api.TabPFNClassifierPipeline.from_artifact(art, device="cpu", loader=fake_loader)
+    monkeypatch.setattr(api, "WEIGHTS_SHA256", "0" * 64)
+    with pytest.raises(ValueError, match="not the pinned"):
+        reloaded.save_artifact(tmp_path / "again", saver=fake_saver, converter=fake_converter)
+    assert not (tmp_path / "again").exists()
+
+
+@pytest.mark.integration
+def test_a_reloaded_bundle_reexports_through_the_real_converter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from test_safetensors_conversion import _synthetic_checkpoint
+
+    ckpt = tmp_path / "upstream.ckpt"
+    _synthetic_checkpoint(ckpt)
+    art = _exported(tmp_path, monkeypatch, checkpoint=ckpt, converter=None)
+    reloaded = api.TabPFNClassifierPipeline.from_artifact(art, device="cpu", loader=fake_loader)
+    again = tmp_path / "again"
+    reloaded.save_artifact(again, saver=fake_saver)  # torch.load(weights_only=True) of the authentic model.ckpt
+    assert api.sha256_file(again / api.CHECKPOINT_NAME) == api.sha256_file(ckpt) == api.WEIGHTS_SHA256
+    assert (again / api.SAFETENSORS_NAME).read_bytes() == (art / api.SAFETENSORS_NAME).read_bytes()
+    api.validate_artifact_bundle(again, verify_conversion=True)
+    # legacy (pre-conversion) bundle: weights come from model.ckpt and the re-export gains the conversion
+    legacy = _legacy(art)
+    reloaded = api.TabPFNClassifierPipeline.from_artifact(legacy, device="cpu", loader=legacy_loader, require_safetensors=False)
+    third = tmp_path / "third"
+    reloaded.save_artifact(third, saver=fake_saver)
+    assert api.sha256_file(third / api.CHECKPOINT_NAME) == api.WEIGHTS_SHA256
+    assert (third / api.SAFETENSORS_NAME).read_bytes() == (again / api.SAFETENSORS_NAME).read_bytes()
+    api.validate_artifact_bundle(third, verify_conversion=True)
