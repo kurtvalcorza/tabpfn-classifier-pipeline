@@ -322,8 +322,13 @@ def restricted_inventory(data: bytes, nested_dir: pathlib.Path, max_pickles: int
             seen.add((module, name))
             if (module, name) in ALLOW:
                 return pickle.Unpickler.find_class(probe, module, name)
-            if (module, name) == ("torch.storage", "_load_from_bytes"):
+            # pickle resolves module + name as one dotted path (protocol 4 allows a dotted name), so every
+            # split of torch.storage._load_from_bytes is the loader; an attribute of it cannot be captured
+            qualified = f"{module}.{name}"
+            if qualified == "torch.storage._load_from_bytes":
                 return capture
+            if qualified.startswith("torch.storage._load_from_bytes."):
+                unresolved.append(qualified)
             return type(f"Stub[{module}.{name}]", (Stub,), {})
 
     fh = io.BytesIO(data)

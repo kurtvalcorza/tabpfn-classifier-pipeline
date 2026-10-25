@@ -471,3 +471,47 @@ def test_unparseable_later_npy_record_is_incomplete(tmp_path, tail):
     status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"arrays.npy": data}))
     assert status == 2, text
     assert "arrays.npy [npy] INCOMPLETE" in text
+
+
+# --- Codex round 2 on scan.py v8: qualified loader names, memos shared across consecutive streams -------
+
+def _su(s: str) -> bytes:
+    b = s.encode()
+    return b"\x8c" + bytes([len(b)]) + b                       # SHORT_BINUNICODE
+
+
+def _loader_call(module: str, name: str, payload: bytes) -> bytes:
+    # protocol 4: STACK_GLOBAL module/name, BINBYTES payload, TUPLE1, REDUCE, STOP
+    return P4 + _su(module) + _su(name) + b"\x93" + b"B" + len(payload).to_bytes(4, "little") + payload + b"\x85R."
+
+
+NT_SYSTEM_P4 = P4 + _su("nt") + _su("system") + b"\x93" + _su("echo never-run") + b"\x85R."
+
+
+@pytest.mark.parametrize("module,name", [
+    pytest.param("torch.storage", "_load_from_bytes", id="exact-spelling"),
+    pytest.param("torch", "storage._load_from_bytes", id="dotted-name"),
+])
+def test_torch_loader_under_any_qualified_split_is_captured(tmp_path, module, name):
+    # Codex P1 (round 2): ('torch', 'storage._load_from_bytes') resolves to the same loader
+    stream = _loader_call(module, name, NT_SYSTEM_P4)
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.pkl": stream}))
+    assert status == 1, text
+    assert "[legacy-torch] DANGEROUS" in text
+
+
+def test_attribute_of_the_torch_loader_is_incomplete(tmp_path):
+    stream = _loader_call("torch.storage", "_load_from_bytes.__call__", NT_SYSTEM_P4)
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.pkl": stream}))
+    assert status == 2, text
+    assert "unscanned" in text
+
+
+@pytest.mark.parametrize("member", ["blob.xyz", "model.pkl"])
+def test_memo_shared_across_consecutive_streams_is_found(tmp_path, member):
+    # Codex P1 (round 2, not reproduced): stream 1 memoizes 'nt'/'system', stream 2 resolves them
+    s1 = P4 + _su("nt") + b"\x94" + _su("system") + b"\x94" + b"00" + b"N."
+    s2 = P4 + b"h\x00h\x01\x93" + _su("echo never-run") + b"\x85R."
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {member: s1 + s2}))
+    assert status == 1, text
+    assert "nt.system" in text

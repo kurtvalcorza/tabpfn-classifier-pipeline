@@ -390,8 +390,9 @@ The two joblib files interleave raw numpy bytes with pickle instructions, so pic
   wrote it (it records only paths inside the asset), `scan.py`, and `test_scan.py`, its regression tests (dangerous globals
   behind joblib buffers or beside joblib files, protocol-0 pickles under other names, pickle/zip polyglots, every PyTorch zip
   member, object-dtype .npy files in every dtype spelling, object records after numeric ones in a multi-record .npy
-  (also inside an .npz), torch payloads in complete pickles, object arrays and protocol-2 bytes, memo-aliased globals,
-  dangerous streams after a clean one or inside one protocol-4 frame, a pickle in front of the asset itself, zip/tar
+  (also inside an .npz), torch payloads in complete pickles or under any qualified split of the loader name, object
+  arrays and protocol-2 bytes, memo-aliased globals (also across consecutive streams), dangerous streams after a clean
+  one or inside one protocol-4 frame, a pickle in front of the asset itself, zip/tar
   polyglots, compressed (including zlib of any window size) and truncated pickles, nested archives that try to
   overwrite queued members, duplicate, escaping and malformed members).
   `scan.py` exits 0 clean, 1 dangerous, 2 incomplete, 3 could not scan.
