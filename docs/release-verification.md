@@ -393,8 +393,10 @@ The two joblib files interleave raw numpy bytes with pickle instructions, so pic
   (also inside an .npz), torch payloads in complete pickles or under any qualified split of the loader name, object
   arrays and protocol-2 bytes, memo-aliased globals (also across consecutive streams), dangerous streams after a clean
   one or inside one protocol-4 frame, a pickle in front of the asset itself, zip/tar
-  polyglots, compressed (including zlib of any window size) and truncated pickles, nested archives that try to
-  overwrite queued members, duplicate, escaping and malformed members).
+  polyglots, compressed (including zlib of any window size or with delayed output, and LZMA-alone) and truncated
+  pickles, streams that share a memo or sit behind a STOP inside a frame, streams after a legacy checkpoint's five
+  pickles and tails that are not its raw storages, nested archives that try to overwrite queued members, duplicate,
+  escaping and malformed members, relative member paths such as `home/` in the report, and unreadable assets).
   `scan.py` exits 0 clean, 1 dangerous, 2 incomplete, 3 could not scan.
 - **Scope:** the threat model at the top of `scan.py` (frozen 2026-10-24) says what the scan covers. Data a loader
   decodes with no format marker, code that is not pickle, and harm through callables picklescan rates safe or

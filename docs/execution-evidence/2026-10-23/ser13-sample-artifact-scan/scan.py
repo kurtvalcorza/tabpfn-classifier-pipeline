@@ -13,6 +13,11 @@ restricted load (joblib's own reader with find_class replaced, so only numpy's a
 rebuilders, numpy.dtype, joblib's NumpyArrayWrapper, _codecs.encode and bytearray are real and
 run; every other global is an inert stub). find_class sees the true name of every global a stream
 resolves, memo aliases included, and the stubs' names are classified with picklescan's own tables.
+It reads consecutive streams twice, with a fresh memo per stream (separate pickle.load calls) and with
+one memo shared across them (one Unpickler), and resumes right after a STOP inside a frame, so no
+stream behind a frame is skipped. In a legacy torch checkpoint the bytes after its five pickles are
+read as further streams while they parse, and the rest must be exactly the raw storages its keys
+describe; anything else is incomplete.
 A file is pickle content if its extension says so, it is an object-dtype .npy, or either reader
 finds a global that is dangerous or a well-formed Python identifier (protocol 0/1 pickles under any
 name); tensor bytes do not parse into identifiers. The asset itself and every zip and tar inside it,
@@ -23,11 +28,13 @@ a member queued for scanning, and members are reported as `outer!/member`. A pic
 of an archive, including the asset itself, is judged too. Every record of a .npy file is walked, as
 successive numpy.load calls would read them: each header is parsed and its dtype judged by NumPy
 (dtype.hasobject), as numpy.load does; any object record makes the file pickle content, and a record
-whose header or extent cannot be parsed makes it incomplete. Payloads of
+whose header or extent cannot be parsed makes it incomplete (object records before it are still
+judged, so a dangerous one wins). Payloads of
 torch.storage._load_from_bytes are captured as files and scanned like any other file, never loaded;
 a payload that cannot be rebuilt as bytes makes its file incomplete.
-gzip, bzip2, xz, zstd, lz4, zlib (any window size), 7z and rar content is not decompressed and is
-incomplete. A file that cannot be read to the end by either reader is incomplete, never clean.
+gzip, bzip2, xz, LZMA-alone, zstd, lz4, zlib (any window size, recognised by its header and a bounded
+trial decompress), 7z and rar content is not decompressed and is incomplete. A file that cannot be
+read to the end by either reader is incomplete, never clean.
 Threat model and scope (frozen 2026-10-24; review findings inside it are fixed, findings outside it
 are recorded as out of scope):
   Goal: before an asset is published, find every byte sequence in it that a standard loader could
@@ -46,8 +53,8 @@ are recorded as out of scope):
   environment running the scan is trusted.
 
 Exit status: 0 all clean; 1 any dangerous; 2 any incomplete (and none dangerous); 3 the asset could
-not be scanned (bad archive, unsafe or duplicate member, unexpected error). The report holds only
-paths relative to the asset.
+not be scanned (unreadable asset, bad archive, unsafe or duplicate member, unexpected error, or a
+report that would name a host path). The report holds only paths relative to the asset.
 """
 from __future__ import annotations
 
@@ -56,6 +63,7 @@ import ast
 import collections
 import hashlib
 import io
+import lzma
 import math
 import pathlib
 import pickle
@@ -193,12 +201,20 @@ def opaque_format(data: bytes) -> str | None:
     for magic, fmt in OPAQUE.items():
         if data.startswith(magic):
             return fmt
-    # zlib (RFC 1950), any window size: CM=8, CINFO<=7, header checksum, and a trial decompress, so
-    # tensor bytes that happen to pass the 2-byte checksum are not mistaken for zlib.
+    # LZMA-alone (joblib's .lzma, header 5d 00), with a trial decompress so tensor bytes are not mistaken
+    if data.startswith(b"\x5d\x00"):
+        try:
+            lzma.LZMADecompressor(lzma.FORMAT_ALONE).decompress(data[:65536], 64)
+            return "lzma"
+        except lzma.LZMAError:
+            pass
+    # zlib (RFC 1950), any window size: CM=8, CINFO<=7, header checksum, and a bounded trial decompress
+    # that must raise no error, so tensor bytes that happen to pass the 2-byte checksum are not mistaken
+    # for zlib. Output is not required: empty stored blocks can delay it past any bound.
     if len(data) >= 2 and data[0] & 0x0F == 8 and data[0] >> 4 <= 7 and (data[0] << 8 | data[1]) % 31 == 0:
         try:
-            if zlib.decompressobj().decompress(data[:65536], 64):
-                return "zlib"
+            zlib.decompressobj().decompress(data[:65536], 65536)
+            return "zlib"
         except zlib.error:
             pass
     return None
@@ -208,7 +224,12 @@ NPY_MAGIC = b"\x93NUMPY"
 
 
 class NpyUnreadable(Exception):
-    """A file with the NumPy magic whose header cannot be parsed (it is then incomplete)."""
+    """A .npy record whose header or extent cannot be parsed (the file is then incomplete). payload holds
+    the pickle streams of the object records before it, which are still judged."""
+
+    def __init__(self, message: str, payload: bytes | None = None):
+        super().__init__(message)
+        self.payload = payload
 
 
 def npy_object_payload(data: bytes) -> bytes | None:
@@ -216,7 +237,8 @@ def npy_object_payload(data: bytes) -> bytes | None:
     pickle streams behind its object-dtype records, joined; None if the file is not a .npy or holds
     only plain records. Each header is parsed (ast.literal_eval) and its dtype resolved by NumPy
     itself, as numpy.load does, so every spelling of an object dtype ('O', '|O8', 'object',
-    structured) counts. A record whose header or extent cannot be parsed raises NpyUnreadable; an
+    structured) counts. A record whose header or extent cannot be parsed raises NpyUnreadable, carrying
+    the object payloads read before it; an
     object record whose pickle cannot be delimited carries the rest of the file, so it is never clean."""
     if not data.startswith(NPY_MAGIC):
         return None
@@ -244,7 +266,7 @@ def npy_object_payload(data: bytes) -> bytes | None:
                 if end > len(data):
                     raise ValueError("array data runs past the end of the file")
         except Exception as exc:
-            raise NpyUnreadable(f"record at offset {off}: {exc}") from exc
+            raise NpyUnreadable(f"record at offset {off}: {exc}", b"".join(payloads) or None) from exc
         if not dtype.hasobject:
             off = end
             continue
@@ -267,11 +289,38 @@ def classify(raw: set[tuple[str, str]]):
     return [(g.module, g.name, g.safety.value) for g in res.globals]
 
 
-def restricted_inventory(data: bytes, nested_dir: pathlib.Path, max_pickles: int | None = None):
+# bytes per element of each torch storage type, for the raw storages of a legacy checkpoint
+ELEMENT_SIZE = {"Double": 8, "Float": 4, "Half": 2, "BFloat16": 2, "Long": 8, "Int": 4, "Short": 2,
+                "Char": 1, "Byte": 1, "Bool": 1, "ComplexDouble": 16, "ComplexFloat": 8, "Untyped": 1,
+                "QUInt8": 1, "QInt8": 1, "QInt32": 4, "QUInt4x2": 1, "QUInt2x4": 1}
+
+
+def legacy_tail_is_storages(tail: bytes, keys, storages: dict) -> bool:
+    """True if the bytes after a legacy checkpoint's pickles are exactly its raw storages, in key order,
+    each an int64 element count and then its bytes, as torch's legacy save writes them."""
+    if not isinstance(keys, list):
+        return False
+    off = 0
+    for key in keys:
+        qualname, _ = storages.get(str(key), ("", None))
+        m = re.fullmatch(r"torch(?:\.cuda)?\.(\w+)Storage", qualname)
+        if m is None or m.group(1) not in ELEMENT_SIZE or off + 8 > len(tail):
+            return False
+        count = int.from_bytes(tail[off:off + 8], "little", signed=True)
+        off += 8 + count * ELEMENT_SIZE[m.group(1)]
+        if count < 0 or off > len(tail):
+            return False
+    return off == len(tail)
+
+
+def restricted_inventory(data: bytes, nested_dir: pathlib.Path, legacy: bool = False):
     """joblib's reader over the bytes, with every global outside ALLOW stubbed, across consecutive
-    pickle streams (up to max_pickles). find_class sees the true module and name of every global the
-    stream resolves, memo aliases included. Returns (parsed_to_end, raw globals, payloads, unresolved)."""
+    pickle streams, once with a fresh memo per stream and once with one shared memo. find_class sees the true module and name of
+    every global the stream resolves, memo aliases included. For a legacy torch checkpoint the bytes
+    after its five pickles are read as streams while they parse, and the rest must be its raw storages.
+    Returns (parsed_to_end, raw globals, payloads, unresolved)."""
     seen: set[tuple[str, str]] = set()
+    storages: dict[str, tuple[str, object]] = {}
     payloads: list[pathlib.Path] = []
     unresolved: list[str] = []
 
@@ -306,7 +355,8 @@ def restricted_inventory(data: bytes, nested_dir: pathlib.Path, max_pickles: int
             digest = hashlib.sha256(arg).hexdigest()
             out = nested_dir / f"nested-{digest[:16]}.pt"
             out.write_bytes(bytes(arg))
-            payloads.append(out)
+            if out not in payloads:  # the same payload is met once per memo mode
+                payloads.append(out)
         else:  # a payload this reader could not rebuild as bytes was never scanned
             unresolved.append(type(arg).__name__)
         return Stub()
@@ -315,7 +365,10 @@ def restricted_inventory(data: bytes, nested_dir: pathlib.Path, max_pickles: int
 
     class Restricted(jnp.NumpyUnpickler):
         def persistent_load(self, pid):
-            # torch checkpoints reference their storages by persistent id; nothing is resolved or loaded
+            # torch checkpoints reference their storages by persistent id; nothing is resolved or loaded,
+            # but a legacy checkpoint's storage types are kept to account for its raw tail
+            if isinstance(pid, tuple) and len(pid) >= 5 and pid[0] == "storage":
+                storages[str(pid[2])] = (getattr(pid[1], "qualname", ""), pid[4])
             return Stub()
 
         def find_class(self, module, name):
@@ -329,17 +382,57 @@ def restricted_inventory(data: bytes, nested_dir: pathlib.Path, max_pickles: int
                 return capture
             if qualified.startswith("torch.storage._load_from_bytes."):
                 unresolved.append(qualified)
-            return type(f"Stub[{module}.{name}]", (Stub,), {})
+            return type(f"Stub[{module}.{name}]", (Stub,), {"qualname": f"{module}.{name}"})
 
-    fh = io.BytesIO(data)
-    count, parsed = 0, False
-    try:
-        while fh.tell() < len(data) and (max_pickles is None or count < max_pickles):
-            Restricted("<bytes>", fh, ensure_native_byte_order=True, mmap_mode=None).load()
-            count += 1
-        parsed = count > 0 and (fh.tell() == len(data) or max_pickles is not None)
-    except Exception:
-        parsed = False
+    def read(shared_memo: bool) -> bool:
+        """One pass over the streams: shared_memo as one Unpickler calling load() repeatedly, otherwise a
+        fresh Unpickler (and memo) per stream, as separate pickle.load calls."""
+        fh = io.BytesIO(data)
+        unpickler = None
+
+        def load_one():
+            nonlocal unpickler
+            if unpickler is None or not shared_memo:
+                unpickler = Restricted("<bytes>", fh, ensure_native_byte_order=True, mmap_mode=None)
+            obj = unpickler.load()
+            frame = unpickler._unframer.current_frame
+            if frame is not None:  # a STOP inside a frame: the next stream starts right after it
+                fh.seek(fh.tell() - (len(frame.getvalue()) - frame.tell()))
+            return obj
+
+        if not legacy:
+            count = 0
+            try:
+                while fh.tell() < len(data):
+                    load_one()
+                    count += 1
+            except Exception:
+                return False
+            return count > 0
+        loaded = []
+        try:
+            while len(loaded) < 5:  # magic, protocol, sys_info, object, storage keys
+                loaded.append(load_one())
+        except Exception:
+            return False
+        while fh.tell() < len(data):  # further streams, as repeated pickle.load would read them
+            start, before = fh.tell(), set(seen)
+            try:
+                load_one()
+            except Exception:
+                # not a stream: the raw storages start here; globals their bytes happen to spell are
+                # dropped unless dangerous
+                junk = seen - before
+                seen.clear()
+                seen.update(before)
+                if junk:
+                    seen.update((m, n) for m, n, s in classify(junk) if s == SafetyLevel.Dangerous.value)
+                fh.seek(start)
+                break
+        return legacy_tail_is_storages(data[fh.tell():], loaded[4], storages)
+
+    # both memo behaviours a standard loader can have; the file is read to the end only if both read it
+    parsed = read(shared_memo=False) & read(shared_memo=True)
     return parsed, seen, payloads, unresolved
 
 
@@ -392,12 +485,15 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
                 results.append({"file": rel(f), "kind": ("pytorch-zip" if ext in PYTORCH_EXT else "archive")
                                 + ("" if not (is_zip and is_tar) else f" ({interpretation})"),
                                 "verdict": "extracted", "detail": f"{len(members)} members queued"})
+        npy_error = None
         try:
             npy_payload = npy_object_payload(data)
         except NpyUnreadable as exc:
-            results.append({"file": rel(f), "kind": "npy", "verdict": "incomplete",
-                            "methods": [f"NumPy header unreadable: {exc}"], "globals": []})
-            continue
+            if exc.payload is None:
+                results.append({"file": rel(f), "kind": "npy", "verdict": "incomplete",
+                                "methods": [f"NumPy header unreadable: {exc}"], "globals": []})
+                continue
+            npy_payload, npy_error = exc.payload, str(exc)
         if npy_payload is not None:
             # an object-dtype .npy (also inside an .npz) is a pickle stream behind the NumPy header
             data = npy_payload
@@ -408,7 +504,7 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
         # its name says so, it is an object .npy, or either reader finds a global that is dangerous
         # or a well-formed Python identifier; tensor bytes do not parse into identifiers.
         ps_ok, ps_globs = picklescan_globals(data, rel(f))
-        parsed, raw, payloads, unresolved = restricted_inventory(data, nested_dir, 5 if legacy else None)
+        parsed, raw, payloads, unresolved = restricted_inventory(data, nested_dir, legacy)
         ps_raw = {(m, n) for m, n, _ in ps_globs}
         ps_dangerous = {(m, n) for m, n, s in ps_globs if s == SafetyLevel.Dangerous.value}
         # A restricted load that read the whole file saw every resolved global; picklescan's list is then
@@ -434,6 +530,9 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
             kind = ("pickle+archive" if (is_zip or is_tar) else "npy-object" if npy_payload is not None
                     else "joblib" if ext == ".joblib" else "pickle")
             complete = not (is_zip or is_tar) and parsed and (reads_to_end(data) or kind in ("joblib", "pickle"))
+        if npy_error:
+            methods.append(f"NumPy header unreadable: {npy_error}")
+            complete = False
         if unresolved:
             methods.append(f"torch payload not rebuilt as bytes ({', '.join(unresolved)}): unscanned")
             complete = False
@@ -445,17 +544,32 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
     return results
 
 
+def host_path(text: str, work: pathlib.Path, asset: pathlib.Path) -> str | None:
+    """Name the host-specific location a report would leak, if any: the scan's work or temp directory,
+    the home or current directory, the asset's directory, or any absolute drive path. Relative member
+    paths such as models/home/... or AppData/... belong to the asset and are allowed."""
+    places = {"work directory": work, "temp directory": pathlib.Path(tempfile.gettempdir()),
+              "home directory": pathlib.Path.home(), "current directory": pathlib.Path.cwd(),
+              "asset directory": asset.absolute().parent}
+    for label, place in places.items():
+        for form in {str(place), place.as_posix()}:
+            if len(form) > 1 and re.search(r"(?<![\w.\-/\\])" + re.escape(form), text):
+                return label
+    if re.search(r"(?<![\w.\-/\\])[A-Za-z]:[\\/]", text):
+        return "absolute drive path"
+    return None
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("asset", type=pathlib.Path)
     ap.add_argument("--report", type=pathlib.Path, required=True)
     args = ap.parse_args(argv)
-    lines = [f"asset={args.asset.name}", f"sha256={sha256(args.asset)}",
-             f"tools: picklescan {version('picklescan')}, joblib {version('joblib')}, "
-             f"numpy {version('numpy')}, python {sys.version.split()[0]}"]
     work = pathlib.Path(tempfile.mkdtemp(prefix="ser13-"))
+    digest = "unreadable"
     try:
         try:
+            digest = sha256(args.asset)  # inside the protected path: an unreadable asset is status 3
             results = scan_asset(args.asset, work)
             aborted = None
         except ScanAbort as exc:
@@ -464,6 +578,10 @@ def main(argv=None) -> int:
             results, aborted = [], f"unexpected {type(exc).__name__}: {exc}"
     finally:
         shutil.rmtree(work, ignore_errors=True)
+    lines = [f"asset={args.asset.name}", f"sha256={digest}",
+             f"tools: picklescan {version('picklescan')}, joblib {version('joblib')}, "
+             f"numpy {version('numpy')}, python {sys.version.split()[0]}"]
+    head = len(lines)
     verdicts = collections.Counter(r["verdict"] for r in results)
     for r in results:
         lines.append(f"-- {r['file']} [{r['kind']}] {r['verdict'].upper()}")
@@ -483,12 +601,14 @@ def main(argv=None) -> int:
     else:
         status = 0
     scanned = sum(1 for r in results if r["verdict"] in ("clean", "dangerous", "incomplete"))
-    lines.append(f"summary: {scanned} pickle files; clean={verdicts['clean']} "
-                 f"dangerous={verdicts['dangerous']} incomplete={verdicts['incomplete']}")
-    lines.append(f"scan_status={status}")
-    text = "\n".join(lines) + "\n"
-    assert not any(tok in text for tok in (str(work), ":\\", ":/", "/home/", "/Users/", "AppData")), \
-        "absolute path in report"
+    summary = (f"summary: {scanned} pickle files; clean={verdicts['clean']} "
+               f"dangerous={verdicts['dangerous']} incomplete={verdicts['incomplete']}")
+    text = "\n".join(lines + [summary, f"scan_status={status}"]) + "\n"
+    leak = host_path(text, work, args.asset)
+    if leak:  # refused through the status-3 path; the offending lines are not written
+        status = 3
+        text = "\n".join(lines[:head] + [f"ABORTED: report would name a host path ({leak})", summary,
+                                         f"scan_status={status}"]) + "\n"
     args.report.write_bytes(text.encode("utf-8"))
     print(text.splitlines()[-2], text.splitlines()[-1])
     return status

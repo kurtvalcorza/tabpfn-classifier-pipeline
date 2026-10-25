@@ -515,3 +515,166 @@ def test_memo_shared_across_consecutive_streams_is_found(tmp_path, member):
     status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {member: s1 + s2}))
     assert status == 1, text
     assert "nt.system" in text
+
+
+# --- Codex round 3 on scan.py v9: shared memos, frames, legacy tails, LZMA-alone, delayed zlib output,
+# partial .npy payloads, report paths, unreadable assets. Fixtures are raw opcodes, never unpickled.
+
+OS_SYSTEM = P4 + _su("os") + _su("system") + b"\x93" + _su("echo never-run") + b"\x85R."
+COPIED_OS_SYSTEM = (P4 + _su("os") + b"\x94" + _su("system") + b"\x94" + b"h\x00q\x02h\x01q\x03" + b"0000"
+                    + b"h\x02h\x03\x93" + _su("echo never-run") + b"\x85R.")   # resolved from memo copies 2/3
+
+
+def test_memo_copies_shared_across_consecutive_streams_are_resolved(tmp_path):
+    # Codex 4369187019: stream 1 copies os/system from memo 0/1 to 2/3; stream 2 resolves 2/3
+    s1 = P4 + _su("os") + b"q\x00" + _su("system") + b"q\x01" + b"00" + b"h\x00q\x02h\x01q\x03" + b"00" + b"N."
+    s2 = P4 + b"h\x02h\x03\x93" + _su("echo never-run") + b"\x85R."
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"blob.xyz": s1 + s2}))
+    assert status == 1, text
+    assert "os.system" in text
+
+
+@pytest.mark.parametrize("data", [
+    pytest.param(_frame(b"N." + COPIED_OS_SYSTEM), id="second-pickle-in-frame"),
+    pytest.param(_frame(_su("os") + b"\x94" + _su("system") + b"\x94" + b"h\x00q\x02h\x01q\x03" + b"0000" + b"N."
+                        + P4 + b"h\x02h\x03\x93" + _su("echo never-run") + b"\x85R."), id="memo-shared-in-frame"),
+    pytest.param(P4 + b"N." + COPIED_OS_SYSTEM, id="control-no-frame"),
+])
+def test_stream_after_a_stop_inside_a_frame_is_read(tmp_path, data):
+    # Codex 4369190584: EOF was trusted after the first load consumed the whole frame
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.pkl": data}))
+    assert status == 1, text
+    assert "os.system" in text
+
+
+def _legacy(obj: bytes, keys: bytes, tail: bytes = b"") -> bytes:
+    magic = b"\x80\x02\x8a\x0a" + (0x1950A86A20F9469CFC6C).to_bytes(10, "little") + b"."
+    sys_info = b"\x80\x02}X\x0d\x00\x00\x00little_endian\x88s."
+    return magic + b"\x80\x02M\xe9\x03." + sys_info + obj + keys + tail
+
+
+EMPTY_OBJ, EMPTY_KEYS = b"\x80\x02}.", b"\x80\x02]."
+# {'w': persistent id ('storage', torch.FloatStorage, '0', 'cpu', 4)} and storage keys ['0']
+FLOAT_OBJ = (b"\x80\x02}X\x01\x00\x00\x00w(X\x07\x00\x00\x00storagectorch\nFloatStorage\n"
+             b"X\x01\x00\x00\x000X\x03\x00\x00\x00cpuK\x04tQs.")
+FLOAT_KEYS = b"\x80\x02]X\x01\x00\x00\x000a."
+FLOAT_TAIL = (4).to_bytes(8, "little") + bytes(16)
+
+
+@pytest.mark.parametrize("data", [
+    pytest.param(_legacy(EMPTY_OBJ, EMPTY_KEYS, COPIED_OS_SYSTEM), id="sixth-stream"),
+    pytest.param(_legacy(EMPTY_OBJ, b"\x80\x02" + _su("os") + b"q\x00" + _su("system") + b"q\x01"
+                         + b"h\x00q\x02h\x01q\x03" + b"0000" + b"].",
+                         P4 + b"h\x02h\x03\x93" + _su("echo never-run") + b"\x85R."), id="memo-from-fifth"),
+    pytest.param(_legacy(FLOAT_OBJ, FLOAT_KEYS, OS_SYSTEM + FLOAT_TAIL), id="stream-before-storages"),
+    pytest.param(_legacy(EMPTY_OBJ, b"\x80\x02]q\x00.", COPIED_OS_SYSTEM), id="earlier-memo-entries"),
+])
+def test_stream_after_the_five_legacy_pickles_is_read(tmp_path, data):
+    # Codex 4369190587: the legacy branch stopped after five streams
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.bin": data}))
+    assert status == 1, text
+    assert "model.bin [legacy-torch] DANGEROUS" in text
+
+
+def test_legacy_raw_storage_tail_is_clean(tmp_path):
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.bin": _legacy(FLOAT_OBJ, FLOAT_KEYS, FLOAT_TAIL)}))
+    assert status == 0, text
+    assert "model.bin [legacy-torch] CLEAN" in text
+
+
+@pytest.mark.parametrize("tail", [FLOAT_TAIL[:-1], FLOAT_TAIL + b"x", b"\x10junk"])
+def test_legacy_tail_that_is_not_its_storages_is_incomplete(tmp_path, tail):
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.bin": _legacy(FLOAT_OBJ, FLOAT_KEYS, tail)}))
+    assert status == 2, text
+
+
+@pytest.mark.parametrize("member", ["state.lzma", "model.lzma"])
+def test_lzma_alone_is_incomplete(tmp_path, member):
+    # Codex 4369190590 / 4369189319: joblib reads .lzma (FORMAT_ALONE, header 5d 00) transparently
+    import lzma
+    buf = io.BytesIO()
+    with lzma.LZMAFile(buf, "wb", format=lzma.FORMAT_ALONE) as f:
+        f.write(OS_SYSTEM)
+    assert buf.getvalue()[:2] == b"\x5d\x00"
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {member: buf.getvalue()}))
+    assert status == 2, text
+    assert "compressed (lzma)" in text
+
+
+def test_bytes_starting_5d00_that_are_not_lzma_are_not_opaque(tmp_path):
+    data = b"\x5d\x00\x00\x80\x00" + b"\xff" * 8 + b"\x07" * 256
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"data/0": data}))
+    assert status == 0, text
+
+
+def test_zlib_with_delayed_output_is_incomplete(tmp_path):
+    # Codex 4365649255: 14,000 empty stored blocks push the first output past the trial window
+    import zlib
+    co = zlib.compressobj(9, zlib.DEFLATED, -15)
+    body = b"\x00\x00\x00\xff\xff" * 14000 + co.compress(OS_SYSTEM) + co.flush()
+    data = b"\x78\x01" + body + zlib.adler32(OS_SYSTEM).to_bytes(4, "big")
+    assert zlib.decompress(data) == OS_SYSTEM
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.z": data}))
+    assert status == 2, text
+    assert "compressed (zlib)" in text
+
+
+@pytest.mark.parametrize("tail", [
+    pytest.param(lambda: _npy_records(np.arange(100))[:-8], id="truncated-record"),
+    pytest.param(lambda: b"trailing junk", id="trailing-junk"),
+])
+def test_dangerous_object_record_before_a_malformed_one_wins(tmp_path, tail):
+    # Codex 4369144484: the collected payload was dropped when a later record was malformed
+    data = _npy("'|O'", NT_SYSTEM) + tail()
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"x.npy": data}))
+    assert status == 1, text
+    assert "x.npy [npy-object] DANGEROUS" in text and "NumPy header unreadable" in text
+
+
+def test_clean_object_record_before_a_malformed_one_is_incomplete(tmp_path):
+    data = _npy("'|O'", b"\x80\x02N.") + b"trailing junk"
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"x.npy": data}))
+    assert status == 2, text
+    assert "x.npy [npy-object] INCOMPLETE" in text
+
+
+@pytest.mark.parametrize("member", ["models/home/model.pkl", "AppData/model.pkl", "Users/x/model.pkl"])
+def test_relative_member_paths_like_home_are_reported(tmp_path, member):
+    # Codex 4369144486: the report check rejected relative components and crashed without a report
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {member: CLEAN}))
+    assert status == 0, text
+    assert f"{member} [pickle] CLEAN" in text
+
+
+def test_a_report_that_would_name_a_host_path_is_refused_with_status_3(tmp_path, monkeypatch):
+    import tempfile
+
+    def boom(asset, work):
+        raise RuntimeError(f"failed under {work} and {tempfile.gettempdir()}")
+    monkeypatch.setattr(scan, "scan_asset", boom)
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"m.pkl": CLEAN}))
+    assert status == 3, text
+    assert "report would name a host path" in text and tempfile.gettempdir() not in text
+
+
+def test_host_path_finds_drive_paths_but_not_relative_components(tmp_path):
+    assert scan.host_path("x C:\\data\\m.pkl", tmp_path, tmp_path / "a.zip") == "absolute drive path"
+    assert scan.host_path("-- models/home/AppData/model.pkl [pickle] CLEAN", tmp_path, tmp_path / "a.zip") is None
+
+
+@pytest.mark.parametrize("kind", ["missing", "directory"])
+def test_unreadable_asset_is_status_3_with_a_report(tmp_path, kind):
+    # Codex 4369186436: the asset was read outside the protected path
+    asset = tmp_path / "asset.zip"
+    if kind == "directory":
+        asset.mkdir()
+    status, text = run(tmp_path, asset)
+    assert status == 3, text
+    assert "sha256=unreadable" in text and "scan_status=3" in text and str(tmp_path) not in text
+
+
+def test_dangerous_pickle_followed_by_a_bare_stack_global_is_found(tmp_path):
+    # Codex 4365660852 (not reproduced): picklescan raises on the trailing STACK_GLOBAL
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"blob.xyz": OS_SYSTEM + b"\x93."}))
+    assert status == 1, text
+    assert "os.system" in text
