@@ -470,7 +470,8 @@ def test_unparseable_later_npy_record_is_incomplete(tmp_path, tail):
     data = _npy_records(np.arange(3)) + tail()
     status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"arrays.npy": data}))
     assert status == 2, text
-    assert "arrays.npy [npy] INCOMPLETE" in text
+    # round 6: bytes without NumPy magic are judged as numpy.load's pickle fallback, so the kind may be npy-object
+    assert "arrays.npy [npy" in text and "] INCOMPLETE" in text
 
 
 # --- Codex round 2 on scan.py v8: qualified loader names, memos shared across consecutive streams -------
@@ -816,3 +817,97 @@ def test_records_at_both_resume_points_are_judged(tmp_path, second, expected):
     data = _framed_object_record(b"N." + _npy_u1_header(len(tail))) + tail
     status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"arrays.npy": data}))
     assert status == expected, text
+
+
+# --- Codex round 6 on scan.py v12: memo-aware paths, compat names, numpy's pickle fallback, report encoding ---
+
+def _memo_split_frame(x: bytes) -> bytes:
+    # one FRAME: memoize os/system at 0/1 and STOP; a second stream inside the frame overwrites 0/1 with
+    # a/b. Right after the STOP and at the frame's end the reader reaches x with different memos.
+    s7 = P4 + _su("a") + b"q\x00" + _su("b") + b"q\x01" + b"00N."
+    body = _su("os") + b"\x94" + _su("system") + b"\x94" + b"00N." + s7
+    return _frame(body) + x
+
+
+MEMO_RESOLVE = P4 + b"h\x00h\x01\x93" + _su("echo never-run") + b"\x85R."
+
+
+@pytest.mark.parametrize("member,data", [
+    pytest.param("model.bin", _legacy(EMPTY_OBJ, EMPTY_KEYS, _memo_split_frame(MEMO_RESOLVE)), id="legacy"),
+    pytest.param("blob.xyz", _memo_split_frame(MEMO_RESOLVE), id="plain"),
+])
+def test_paths_with_different_memos_at_one_position_are_both_read(tmp_path, member, data):
+    # Codex 4371787648: the path key ignored the memo, so the os/system path was merged away
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {member: data}))
+    assert status == 1, text
+    assert "os.system" in text
+
+
+def test_paths_with_different_memos_that_read_to_the_end_are_clean(tmp_path):
+    data = _legacy(EMPTY_OBJ, EMPTY_KEYS, _memo_split_frame(P4 + b"N."))
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.bin": data}))
+    assert status == 0, text
+
+
+@pytest.mark.parametrize("module,name", [
+    ("urllib", "urlopen"), ("urllib", "urlretrieve"), ("urllib", "getproxies"), ("urllib", "pathname2url"),
+    ("urllib", "url2pathname"), ("urllib", "urlcleanup"), ("urllib2", "urlopen"), ("cPickle", "loads"),
+    ("test.test_support", "run_unittest"), ("__builtin__", "intern"), ("_socket", "fromfd"),
+])
+def test_protocol2_compatibility_name_is_classified(tmp_path, module, name):
+    # Codex 4371787651: pickle maps these names for protocol < 3 to callables picklescan rates dangerous
+    stream = b"\x80\x02c" + module.encode() + b"\n" + name.encode() + b"\n."
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"blob.xyz": stream}))
+    assert status == 1, text
+
+
+@pytest.mark.parametrize("stream", [
+    pytest.param(b"\x80\x03curllib\nurlopen\n.", id="protocol-3-is-not-mapped"),
+    pytest.param(b"\x80\x02cthread\nstart_new_thread\n.", id="mapped-name-not-dangerous"),
+])
+def test_compatibility_controls_stay_clean(tmp_path, stream):
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"blob.xyz": stream}))
+    assert status == 0, text
+
+
+@pytest.mark.parametrize("pickled", [pytest.param(NT_SYSTEM, id="protocol-2"),
+                                     pytest.param(NT_SYSTEM_P4, id="protocol-4")])
+def test_pickle_without_numpy_magic_after_a_record_is_scanned(tmp_path, pickled):
+    # Codex 4371767706: numpy.load(allow_pickle=True) unpickles bytes that have no NumPy magic
+    data = _npy_records(np.arange(3)) + pickled
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"x.npy": data}))
+    assert status == 1, text
+
+
+def test_clean_pickle_without_numpy_magic_after_a_record_is_clean(tmp_path):
+    data = _npy_records(np.arange(3)) + b"\x80\x02N."
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"x.npy": data}))
+    assert status == 0, text
+
+
+def test_ext_opcodes_without_proto_before_stack_global_are_dangerous(tmp_path):
+    # Codex 4371767698 (not reproduced): picklescan flags the unresolved STACK_GLOBAL
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"blob.xyz": b"\x82)\x82*\x93."}))
+    assert status == 1, text
+
+
+def test_tar_member_with_a_non_utf8_name_is_reported(tmp_path):
+    # Codex 4371767712: encoding the report crashed on a surrogate-escaped name
+    import tarfile
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w", format=tarfile.GNU_FORMAT, encoding="utf-8",
+                      errors="surrogateescape") as tf:
+        info = tarfile.TarInfo("model-\udcff.pkl")
+        info.size = len(CLEAN)
+        tf.addfile(info, io.BytesIO(CLEAN))
+    assert b"model-\xff.pkl" in buf.getvalue()
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"bundle.tar": buf.getvalue()}))
+    assert status == 0, text
+    assert "model-\\udcff.pkl [pickle] CLEAN" in text
+
+
+def test_report_that_cannot_be_written_is_status_3(tmp_path):
+    asset = make_zip(tmp_path / "a.zip", {"m.pkl": CLEAN})
+    target = tmp_path / "report-dir"
+    target.mkdir()
+    assert scan.main([str(asset), "--report", str(target)]) == 3

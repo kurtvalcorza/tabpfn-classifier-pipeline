@@ -12,13 +12,16 @@ Content decides, not the file name. Two readers see every file's bytes: picklesc
 restricted load (joblib's own reader with find_class replaced, so only numpy's array and scalar
 rebuilders, numpy.dtype, joblib's NumpyArrayWrapper, _codecs.encode and bytearray are real and
 run; every other global is an inert stub). find_class sees the true name of every global a stream
-resolves, memo aliases included, and the stubs' names are classified with picklescan's own tables.
-It reads consecutive streams twice, with a fresh memo per stream (separate pickle.load calls) and with
-one memo shared across them (one Unpickler). After a STOP inside a frame it follows both
-continuations, right after the STOP (a loader that reads ahead) and at the frame's end (one that reads
-the whole frame); the globals of every path are judged together, and every path must read to the end. In a legacy torch checkpoint the bytes after its five pickles are
-read as further streams while they parse, and the rest must be exactly the raw storages its keys
-describe; anything else is incomplete.
+resolves, memo aliases included, and the stubs' names are classified with picklescan's own tables;
+for protocols below 3 the name pickle's compatibility mapping resolves it to (urllib.urlopen to
+urllib.request.urlopen, for example) is classified too, and the more severe rating wins. It reads
+consecutive streams twice, with a fresh memo per stream (separate pickle.load calls) and with one
+memo shared across them (one Unpickler). After a STOP inside a frame it follows both continuations,
+right after the STOP (a loader that reads ahead) and at the frame's end (one that reads the whole
+frame); paths are told apart by position, stream count and memo contents, the globals of every path
+are judged together, and every path must read to the end. In a legacy torch checkpoint the bytes
+after its five pickles are read as further streams while they parse, and the rest must be exactly
+the raw storages its keys describe; anything else is incomplete.
 A file is pickle content if its extension says so, it is an object-dtype .npy, or either reader
 finds a global that is dangerous or a well-formed Python identifier (protocol 0/1 pickles under any
 name); tensor bytes do not parse into identifiers. The asset itself and every zip and tar inside it,
@@ -33,11 +36,13 @@ whose header or extent cannot be parsed makes it incomplete (object records befo
 judged, so a dangerous one wins). When an object record's pickle stops inside a FRAME, the next record
 is looked for both right after its STOP and at the frame's end, as loaders with and without read-ahead
 would resume; every record either path reaches is judged, each object record's pickle is read on its
-own, and a path that reaches no valid record makes the file incomplete. Extension-registry opcodes
-(EXT1/2/4) make a file pickle content and incomplete, also in a stream that fails to load if it began
-with a PROTO opcode: the global they name is resolved only by the loading process's copyreg registry. Payloads of
-torch.storage._load_from_bytes are captured as files and scanned like any other file, never loaded;
-a payload that cannot be rebuilt as bytes makes its file incomplete.
+own, and a path that reaches no valid record makes the file incomplete. Bytes without NumPy magic
+after a record are a pickle, as numpy.load(allow_pickle=True) falls back to pickle.load for them.
+Extension-registry opcodes (EXT1/2/4) make a file pickle content and incomplete, also in a stream
+that fails to load if it began with a PROTO opcode: the global they name is resolved only by the
+loading process's copyreg registry. Payloads of torch.storage._load_from_bytes are captured as files
+and scanned like any other file, never loaded; a payload that cannot be rebuilt as bytes makes its
+file incomplete.
 gzip, bzip2, xz, LZMA-alone, zstd, lz4, zlib (any window size, recognised by its header and a bounded
 trial decompress), 7z and rar content is not decompressed and is incomplete, also when it sits in
 front of an archive. A file that cannot be read to the end by either reader is incomplete, never
@@ -55,13 +60,18 @@ are recorded as out of scope):
   - code that is not pickle (Python source, notebooks, TorchScript, ONNX custom operators, shared
     libraries) and loaders that read a pickle from a non-standard offset inside another format;
   - harm done through callables picklescan classifies as safe or suspicious (for example a library
-    constructor with side effects): picklescan's tables are the policy, not a judgement made here.
+    constructor with side effects): picklescan's tables are the policy, not a judgement made here;
+  - an extension-registry opcode in bytes that have no PROTO opcode and do not load to a STOP (a known
+    gap, ruled 2026-10-26): flagging those would turn 4 of the 6 published sample assets incomplete
+    through 15 raw tensor members whose bytes happen to begin with those opcodes.
   Assumes: the scanned bytes are the bytes that get published (the asset digest is pinned), and the
   environment running the scan is trusted.
 
 Exit status: 0 all clean; 1 any dangerous; 2 any incomplete (and none dangerous); 3 the asset could
-not be scanned (unreadable asset, bad archive, unsafe or duplicate member, unexpected error, or a
-report that would name a host path). The report holds only paths relative to the asset.
+not be scanned (unreadable asset, bad archive, unsafe or duplicate member, unexpected error, a
+report that would name a host path, or a report that cannot be written). The report holds only paths
+relative to the asset; text that cannot be encoded as UTF-8 (names with surrogate escapes) is written
+backslash-escaped.
 """
 from __future__ import annotations
 
@@ -72,6 +82,7 @@ import hashlib
 import io
 import lzma
 import math
+import _compat_pickle
 import pathlib
 import pickle
 import pickletools
@@ -262,6 +273,25 @@ def npy_object_payloads(data: bytes) -> list[bytes] | None:
         if len(done) > 10000:
             errors.append("too many record paths")
             break
+        if off and not data.startswith(NPY_MAGIC, off):
+            # numpy.load(allow_pickle=True) falls back to pickle.load for bytes without NumPy magic
+            bio = io.BytesIO(data)
+            bio.seek(off)
+            frame_end = None
+            try:
+                for op, arg, pos in pickletools.genops(bio):
+                    if op.name == "FRAME":
+                        frame_end = pos + 9 + arg
+            except Exception:
+                payloads.append(data[off:])
+                errors.append(f"record at offset {off}: no NumPy magic, and not a complete pickle")
+                continue
+            stop = bio.tell()
+            payloads.append(data[off:stop])
+            todo.append(stop)
+            if frame_end is not None and stop < frame_end <= len(data):
+                todo.append(frame_end)
+            continue
         try:
             if not data.startswith(NPY_MAGIC, off):
                 raise ValueError("no NumPy magic")
@@ -309,6 +339,26 @@ def npy_object_payloads(data: bytes) -> list[bytes] | None:
     if errors:
         raise NpyUnreadable("; ".join(errors), payloads or None)
     return payloads or None
+
+
+def with_compat_names(pairs: set[tuple[str, str]]) -> set[tuple[str, str]]:
+    """The names plus what pickle's protocol-<3 compatibility mapping resolves each to (picklescan does
+    not report the protocol, so the mapping is applied to every name it finds)."""
+    out = set(pairs)
+    for module, name in pairs:
+        mapped = _compat_pickle.NAME_MAPPING.get((module, name))
+        if mapped is None and module in _compat_pickle.IMPORT_MAPPING:
+            mapped = (_compat_pickle.IMPORT_MAPPING[module], name)
+        if mapped is not None:
+            out.add(mapped)
+    return out
+
+
+def memo_key(memo: dict) -> tuple:
+    """A fingerprint of a memo's contents, so reader paths that reach one position with different memos
+    are both followed: plain values by hash, other objects by identity."""
+    return tuple(sorted((k, type(v).__name__, hash(v) if isinstance(v, str | bytes | int | float | bool | None)
+                         else id(v)) for k, v in memo.items()))
 
 
 def classify(raw: set[tuple[str, str]]):
@@ -407,6 +457,12 @@ def restricted_inventory(data: bytes, nested_dir: pathlib.Path, legacy: bool = F
 
         def find_class(self, module, name):
             seen.add((module, name))
+            if self.proto < 3 and self.fix_imports:  # what pickle's own find_class resolves the name to
+                mapped = _compat_pickle.NAME_MAPPING.get((module, name))
+                if mapped is None and module in _compat_pickle.IMPORT_MAPPING:
+                    mapped = (_compat_pickle.IMPORT_MAPPING[module], name)
+                if mapped is not None and mapped != (module, name):
+                    seen.add(mapped)
             if (module, name) in ALLOW:
                 return pickle.Unpickler.find_class(probe, module, name)
             # pickle resolves module + name as one dotted path (protocol 4 allows a dotted name), so every
@@ -427,9 +483,10 @@ def restricted_inventory(data: bytes, nested_dir: pathlib.Path, legacy: bool = F
         ok, todo, done = True, [(0, {}, 0, None)], set()
         while todo:
             pos, memo, count, keys = todo.pop()
-            if (pos, min(count, 5)) in done:
+            key = (pos, min(count, 5), memo_key(memo) if shared_memo else ())
+            if key in done:
                 continue
-            done.add((pos, min(count, 5)))
+            done.add(key)
             if len(done) > 10000:
                 return False
             if pos == len(data):
@@ -554,7 +611,7 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
             unresolved += p_unresolved
             extensions.update(p_ext)
         extensions = sorted(extensions)
-        ps_raw = {(m, n) for m, n, _ in ps_globs}
+        ps_raw = with_compat_names({(m, n) for m, n, _ in ps_globs})
         ps_dangerous = {(m, n) for m, n, s in ps_globs if s == SafetyLevel.Dangerous.value}
         # A restricted load that read the whole file saw every resolved global; picklescan's list is then
         # kept only for its dangerous findings (it loses its place after raw buffers and misreads memo
@@ -596,6 +653,12 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
         results.append({"file": rel(f), "kind": kind, "verdict": verdict, "methods": methods,
                         "globals": sorted(set(globs))})
     return results
+
+
+def safe_text(text: str) -> str:
+    """Report text that always encodes as UTF-8: lone surrogates (from names decoded with surrogate
+    escapes) become backslash escapes."""
+    return text.encode("utf-8", "backslashreplace").decode("utf-8")
 
 
 def host_path(text: str, work: pathlib.Path, asset: pathlib.Path) -> str | None:
@@ -657,13 +720,22 @@ def main(argv=None) -> int:
     scanned = sum(1 for r in results if r["verdict"] in ("clean", "dangerous", "incomplete"))
     summary = (f"summary: {scanned} pickle files; clean={verdicts['clean']} "
                f"dangerous={verdicts['dangerous']} incomplete={verdicts['incomplete']}")
-    text = "\n".join(lines + [summary, f"scan_status={status}"]) + "\n"
+    text = safe_text("\n".join(lines + [summary, f"scan_status={status}"]) + "\n")
     leak = host_path(text, work, args.asset)
     if leak:  # refused through the status-3 path; the offending lines are not written
         status = 3
-        text = "\n".join(lines[:head] + [f"ABORTED: report would name a host path ({leak})", summary,
-                                         f"scan_status={status}"]) + "\n"
-    args.report.write_bytes(text.encode("utf-8"))
+        text = safe_text("\n".join(lines[:head] + [f"ABORTED: report would name a host path ({leak})", summary,
+                                                   f"scan_status={status}"]) + "\n")
+    try:
+        args.report.write_bytes(text.encode("utf-8"))
+    except Exception as exc:  # the report could not be written: status 3, never a crash
+        status = 3
+        text = safe_text("\n".join(lines[:head] + [f"ABORTED: report could not be written ({type(exc).__name__})",
+                                                   summary, f"scan_status={status}"]) + "\n")
+        try:
+            args.report.write_bytes(text.encode("utf-8"))
+        except Exception:
+            pass
     print(text.splitlines()[-2], text.splitlines()[-1])
     return status
 
