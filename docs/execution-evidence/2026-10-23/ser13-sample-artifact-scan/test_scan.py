@@ -678,3 +678,87 @@ def test_dangerous_pickle_followed_by_a_bare_stack_global_is_found(tmp_path):
     status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"blob.xyz": OS_SYSTEM + b"\x93."}))
     assert status == 1, text
     assert "os.system" in text
+
+
+# --- Codex round 4 on scan.py v10: STOP inside a FRAME in a .npy, EXT opcodes, compressed prefix + archive ---
+
+def _framed_object_record(body: bytes) -> bytes:
+    return _npy("'|O'", _frame(body))
+
+
+@pytest.mark.parametrize("second,expected", [
+    pytest.param(lambda: _npy_records(np.arange(3)), 0, id="benign-second-record"),
+    pytest.param(lambda: _npy("'|O'", NT_SYSTEM), 1, id="dangerous-second-record"),
+])
+def test_record_after_a_stop_inside_a_frame_is_reached(tmp_path, second, expected):
+    # Codex 4369383122: the bytes left in the frame after STOP were read as the next header
+    data = _framed_object_record(b"N." + b"PADDING") + second()
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"arrays.npy": data}))
+    assert status == expected, text
+
+
+def test_record_after_a_full_frame_is_reached(tmp_path):
+    data = _framed_object_record(b"N.") + _npy_records(np.arange(3))
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"arrays.npy": data}))
+    assert status == 0, text
+
+
+def test_no_record_at_either_resume_point_is_incomplete(tmp_path):
+    data = _framed_object_record(b"N." + b"PADDING") + b"trailing junk"
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"arrays.npy": data}))
+    assert status == 2, text
+
+
+@pytest.mark.parametrize("stream", [
+    pytest.param(b"\x80\x02\x82*.", id="EXT1"),
+    pytest.param(b"\x80\x02\x83" + (42).to_bytes(2, "little") + b".", id="EXT2"),
+    pytest.param(b"\x80\x02\x84" + (42).to_bytes(4, "little") + b".", id="EXT4"),
+])
+def test_extension_registry_opcode_is_incomplete(tmp_path, stream):
+    # Codex 4370794576: an unregistered extension code made the restricted load fail and the file vanish
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"blob.xyz": stream}))
+    assert status == 2, text
+    assert "blob.xyz [pickle] INCOMPLETE" in text and "extension-registry opcode (code 42)" in text
+
+
+def test_extension_opcode_beside_a_dangerous_global_is_dangerous(tmp_path):
+    stream = b"\x80\x02\x82*0" + NT_SYSTEM[2:]
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"blob.xyz": stream}))
+    assert status == 1, text
+
+
+def test_stream_without_extension_opcodes_is_unchanged(tmp_path):
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"blob.xyz": b"\x80\x02N."}))
+    assert status == 0, text
+    assert "extension-registry" not in text
+
+
+@pytest.mark.parametrize("fmt,compress", [
+    ("zlib", lambda b: __import__("zlib").compress(b)),
+    ("gzip", lambda b: gzip.compress(b)),
+])
+def test_compressed_prefix_in_front_of_an_archive_is_incomplete(tmp_path, fmt, compress):
+    # Codex 4370794577: the archive guard skipped compression detection
+    data = compress(OS_SYSTEM) + _zip_bytes({"info.json": b"{}"})
+    assert zipfile.is_zipfile(io.BytesIO(data))
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.dat2": data}))
+    assert status == 2, text
+    assert f"model.dat2 [compressed ({fmt})] INCOMPLETE" in text and "model.dat2 [archive] EXTRACTED" in text
+
+
+def test_plain_zip_member_is_not_compressed(tmp_path):
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"inner.zip": _zip_bytes({"m.pkl": CLEAN})}))
+    assert status == 0, text
+    assert "compressed" not in text
+
+
+def test_gzipped_tar_is_unpacked_and_scanned_not_opaque(tmp_path):
+    import tarfile
+    tgz = tmp_path / "t.tar.gz"
+    with tarfile.open(tgz, "w:gz") as tf:
+        info = tarfile.TarInfo("m.pkl")
+        info.size = len(CLEAN)
+        tf.addfile(info, io.BytesIO(CLEAN))
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"bundle.tgz": tgz.read_bytes()}))
+    assert status == 0, text
+    assert "bundle.tgz!/m.pkl [pickle] CLEAN" in text

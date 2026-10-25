@@ -29,12 +29,16 @@ of an archive, including the asset itself, is judged too. Every record of a .npy
 successive numpy.load calls would read them: each header is parsed and its dtype judged by NumPy
 (dtype.hasobject), as numpy.load does; any object record makes the file pickle content, and a record
 whose header or extent cannot be parsed makes it incomplete (object records before it are still
-judged, so a dangerous one wins). Payloads of
+judged, so a dangerous one wins). When an object record's pickle stops inside a FRAME, the next record
+is looked for right after its STOP and then at the frame's end, as loaders with and without read-ahead
+would resume. Extension-registry opcodes (EXT1/2/4) make a file pickle content and incomplete: the
+global they name is resolved only by the loading process's copyreg registry. Payloads of
 torch.storage._load_from_bytes are captured as files and scanned like any other file, never loaded;
 a payload that cannot be rebuilt as bytes makes its file incomplete.
 gzip, bzip2, xz, LZMA-alone, zstd, lz4, zlib (any window size, recognised by its header and a bounded
-trial decompress), 7z and rar content is not decompressed and is incomplete. A file that cannot be
-read to the end by either reader is incomplete, never clean.
+trial decompress), 7z and rar content is not decompressed and is incomplete, also when it sits in
+front of an archive. A file that cannot be read to the end by either reader is incomplete, never
+clean.
 Threat model and scope (frozen 2026-10-24; review findings inside it are fixed, findings outside it
 are recorded as out of scope):
   Goal: before an asset is published, find every byte sequence in it that a standard loader could
@@ -273,14 +277,21 @@ def npy_object_payload(data: bytes) -> bytes | None:
         # numpy.load unpickles one stream behind an object header; the next record starts after it
         bio = io.BytesIO(data)
         bio.seek(body)
+        frame_end = None
         try:
-            for _ in pickletools.genops(bio):
-                pass
+            for op, arg, pos in pickletools.genops(bio):
+                if op.name == "FRAME":
+                    frame_end = pos + 9 + arg
         except Exception:
             payloads.append(data[body:])
             break
         payloads.append(data[body:bio.tell()])
         off = bio.tell()
+        # a STOP inside a FRAME: a loader with read-ahead resumes after the STOP, one without at the
+        # frame's end; take the one that holds the next record (or the end of the file)
+        if frame_end is not None and off < frame_end <= len(data) and not (
+                off == len(data) or data.startswith(NPY_MAGIC, off)):
+            off = frame_end
     return b"".join(payloads) if payloads else None
 
 
@@ -318,9 +329,11 @@ def restricted_inventory(data: bytes, nested_dir: pathlib.Path, legacy: bool = F
     pickle streams, once with a fresh memo per stream and once with one shared memo. find_class sees the true module and name of
     every global the stream resolves, memo aliases included. For a legacy torch checkpoint the bytes
     after its five pickles are read as streams while they parse, and the rest must be its raw storages.
-    Returns (parsed_to_end, raw globals, payloads, unresolved)."""
+    Returns (parsed_to_end, raw globals, payloads, unresolved, extension codes)."""
     seen: set[tuple[str, str]] = set()
     storages: dict[str, tuple[str, object]] = {}
+    extensions: set[int] = set()   # EXT1/2/4 codes of streams that loaded to their STOP
+    pending: list[int] = []
     payloads: list[pathlib.Path] = []
     unresolved: list[str] = []
 
@@ -371,6 +384,11 @@ def restricted_inventory(data: bytes, nested_dir: pathlib.Path, legacy: bool = F
                 storages[str(pid[2])] = (getattr(pid[1], "qualname", ""), pid[4])
             return Stub()
 
+        def get_extension(self, code):
+            # the global behind an extension code lives in the loading process's copyreg registry
+            pending.append(code)
+            self.append(type(f"Stub[extension {code}]", (Stub,), {}))
+
         def find_class(self, module, name):
             seen.add((module, name))
             if (module, name) in ALLOW:
@@ -394,7 +412,9 @@ def restricted_inventory(data: bytes, nested_dir: pathlib.Path, legacy: bool = F
             nonlocal unpickler
             if unpickler is None or not shared_memo:
                 unpickler = Restricted("<bytes>", fh, ensure_native_byte_order=True, mmap_mode=None)
+            pending.clear()
             obj = unpickler.load()
+            extensions.update(pending)
             frame = unpickler._unframer.current_frame
             if frame is not None:  # a STOP inside a frame: the next stream starts right after it
                 fh.seek(fh.tell() - (len(frame.getvalue()) - frame.tell()))
@@ -433,7 +453,7 @@ def restricted_inventory(data: bytes, nested_dir: pathlib.Path, legacy: bool = F
 
     # both memo behaviours a standard loader can have; the file is read to the end only if both read it
     parsed = read(shared_memo=False) & read(shared_memo=True)
-    return parsed, seen, payloads, unresolved
+    return parsed, seen, payloads, unresolved, sorted(extensions)
 
 
 def scan_asset(asset: pathlib.Path, work: pathlib.Path):
@@ -504,21 +524,21 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
         # its name says so, it is an object .npy, or either reader finds a global that is dangerous
         # or a well-formed Python identifier; tensor bytes do not parse into identifiers.
         ps_ok, ps_globs = picklescan_globals(data, rel(f))
-        parsed, raw, payloads, unresolved = restricted_inventory(data, nested_dir, legacy)
+        parsed, raw, payloads, unresolved, extensions = restricted_inventory(data, nested_dir, legacy)
         ps_raw = {(m, n) for m, n, _ in ps_globs}
         ps_dangerous = {(m, n) for m, n, s in ps_globs if s == SafetyLevel.Dangerous.value}
         # A restricted load that read the whole file saw every resolved global; picklescan's list is then
         # kept only for its dangerous findings (it loses its place after raw buffers and misreads memo
         # aliases). Otherwise both lists are kept.
         globs = classify(raw | (ps_dangerous if parsed else ps_raw))
-        is_pickle = hinted or npy_payload is not None or any(
+        is_pickle = hinted or npy_payload is not None or bool(extensions) or any(
             s == SafetyLevel.Dangerous.value or (IDENT.match(m) and IDENT.match(n)) for m, n, s in globs)
         if not is_pickle:
-            if not (is_zip or is_tar):
-                fmt = opaque_format(data)
-                if fmt is not None:
-                    results.append({"file": rel(f), "kind": f"compressed ({fmt})", "verdict": "incomplete",
-                                    "methods": ["not decompressed: contents unscanned"], "globals": []})
+            # also in front of an archive; a tar that tarfile itself decompressed was unpacked and scanned
+            fmt = opaque_format(data)
+            if fmt is not None and not (is_tar and fmt in ("gzip", "bzip2", "xz")):
+                results.append({"file": rel(f), "kind": f"compressed ({fmt})", "verdict": "incomplete",
+                                "methods": ["not decompressed: contents unscanned"], "globals": []})
             continue
         methods = ["picklescan 1.0.5 (bytes)" if ps_ok else "picklescan 1.0.5 (bytes): parser error",
                    "restricted load (joblib 1.6.0, numpy 2.5.4)"]
@@ -532,6 +552,10 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
             complete = not (is_zip or is_tar) and parsed and (reads_to_end(data) or kind in ("joblib", "pickle"))
         if npy_error:
             methods.append(f"NumPy header unreadable: {npy_error}")
+            complete = False
+        if extensions:
+            methods.append(f"extension-registry opcode (code {', '.join(map(str, extensions))}): global "
+                           "resolved only by the loader's copyreg registry, unscanned")
             complete = False
         if unresolved:
             methods.append(f"torch payload not rebuilt as bytes ({', '.join(unresolved)}): unscanned")
