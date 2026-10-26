@@ -393,7 +393,8 @@ The two joblib files interleave raw numpy bytes with pickle instructions, so pic
   (also inside an .npz, and at both resume points after a STOP inside a frame), extension-registry opcodes (also in
   streams that fail to load), compressed prefixes in front of an archive, streams at both continuations of a frame
   (also with different memos), protocol-2 compatibility names, pickles after a record without NumPy magic, non-UTF-8
-  member names, extension codes inside joblib object arrays, torch payloads in complete pickles or under any qualified split of the loader name, object
+  member names, extension codes inside joblib object arrays, archive nesting, member-count and extracted-size
+  limits, failures while building the report, drive-like member names, torch payloads in complete pickles or under any qualified split of the loader name, object
   arrays and protocol-2 bytes, memo-aliased globals (also across consecutive streams), dangerous streams after a clean
   one or inside one protocol-4 frame, a pickle in front of the asset itself, zip/tar
   polyglots, compressed (including zlib of any window size or with delayed output, and LZMA-alone) and truncated

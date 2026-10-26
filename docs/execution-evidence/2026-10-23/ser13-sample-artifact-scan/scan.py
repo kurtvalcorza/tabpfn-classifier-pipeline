@@ -28,7 +28,10 @@ name); tensor bytes do not parse into identifiers. The asset itself and every zi
 PyTorch zips included, are extracted with member-path, link and duplicate-name checks (a file that
 is both a zip and a tar is extracted both ways), and members are queued, so archives inside
 archives are reached; each nested archive unpacks into a fresh directory, so nothing can write over
-a member queued for scanning, and members are reported as `outer!/member`. A pickle stream in front
+a member queued for scanning, and members are reported as `outer!/member`. An archive byte-identical
+to one already unpacked is not unpacked again. Limits: archives nested more than 32 deep, more than
+200000 extracted members, or more than 16 GiB extracted in total (counted from declared member sizes,
+before anything is written) make the asset status 3, not scanned. A pickle stream in front
 of an archive, including the asset itself, is judged too. Every record of a .npy file is walked, as
 successive numpy.load calls would read them: each header is parsed and its dtype judged by NumPy
 (dtype.hasobject), as numpy.load does; any object record makes the file pickle content, and a record
@@ -73,8 +76,8 @@ are recorded as out of scope):
   environment running the scan is trusted.
 
 Exit status: 0 all clean; 1 any dangerous; 2 any incomplete (and none dangerous); 3 the asset could
-not be scanned (unreadable asset, bad archive, unsafe or duplicate member, unexpected error, a
-report that would name a host path, or a report that cannot be written). The report holds only paths
+not be scanned (unreadable asset, bad archive, unsafe or duplicate member, an exceeded limit,
+unexpected error, a report that would name a host path, or a report that cannot be built or written). The report holds only paths
 relative to the asset; text that cannot be encoded as UTF-8 (names with surrogate escapes) is written
 backslash-escaped.
 """
@@ -124,6 +127,11 @@ ALLOW = {
 }
 
 
+MAX_DEPTH = 32                 # archives nested inside archives
+MAX_MEMBERS = 200_000          # extracted members in total
+MAX_EXTRACT_BYTES = 16 << 30   # 16 GiB extracted in total, from declared member sizes
+
+
 class ScanAbort(Exception):
     """The asset cannot be scanned at all (exit 3)."""
 
@@ -144,10 +152,20 @@ def _check_member(name: str, root: pathlib.Path, seen: set[str]) -> pathlib.Path
     return target
 
 
-def safe_extract(archive: pathlib.Path, dest: pathlib.Path, interpretation: str = "zip") -> list[pathlib.Path]:
+def safe_extract(archive: pathlib.Path, dest: pathlib.Path, interpretation: str = "zip",
+                 budget: dict | None = None) -> list[pathlib.Path]:
     """Extract a zip or tar completely, or abort: bad CRC, absolute or escaping paths, links,
-    special files, duplicate member names (a loader and this scan could read different copies)."""
+    special files, duplicate member names (a loader and this scan could read different copies), and
+    more bytes than the scan's remaining extraction budget (checked from each declared member size
+    before the member is written; zipfile and tarfile read no more than the declared size)."""
     out, seen = [], set()
+    budget = {"bytes": MAX_EXTRACT_BYTES} if budget is None else budget
+
+    def spend(size: int, name: str) -> None:
+        budget["bytes"] -= size
+        if size < 0 or budget["bytes"] < 0:
+            raise ScanAbort(f"extracting {name!r} exceeds the {MAX_EXTRACT_BYTES} byte extraction limit")
+
     try:
         if interpretation == "zip" and zipfile.is_zipfile(archive):
             with zipfile.ZipFile(archive) as zf:
@@ -161,6 +179,7 @@ def safe_extract(archive: pathlib.Path, dest: pathlib.Path, interpretation: str 
                     if info.is_dir():
                         target.mkdir(parents=True, exist_ok=True)
                         continue
+                    spend(info.file_size, info.filename)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     with zf.open(info) as src, open(target, "wb") as dst:
                         shutil.copyfileobj(src, dst)
@@ -174,6 +193,7 @@ def safe_extract(archive: pathlib.Path, dest: pathlib.Path, interpretation: str 
                         continue
                     if not info.isfile():
                         raise ScanAbort(f"non-regular tar member {info.name!r}")
+                    spend(info.size, info.name)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     with tf.extractfile(info) as src, open(target, "wb") as dst:
                         shutil.copyfileobj(src, dst)
@@ -558,6 +578,10 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
     outer.parent.mkdir()
     shutil.copyfile(asset, outer)
     queue = collections.deque([outer])
+    depth = {outer: 0}             # archives between the asset and each queued file
+    budget = {"bytes": MAX_EXTRACT_BYTES}
+    unpacked: set[str] = set()     # digests of archives already unpacked
+    members_total = 0
     results = []
     # every extraction root, with the label its members are reported under; nested archives get a
     # fresh directory of their own, so no archive can write over a member queued for scanning
@@ -579,7 +603,15 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
         hinted = (ext in PICKLE_EXT or ext in PYTORCH_EXT or f.parent == nested_dir) and not (is_zip or is_tar)
         if f == outer and not (is_zip or is_tar):
             raise ScanAbort(f"asset {asset.name} is not a zip or tar archive")
-        if is_zip or is_tar:
+        archive_digest = hashlib.sha256(data).hexdigest() if (is_zip or is_tar) else None
+        if archive_digest is not None and archive_digest in unpacked:
+            # its members were already queued under the archive it duplicates
+            results.append({"file": rel(f), "kind": "archive", "verdict": "extracted",
+                            "detail": "byte-identical to an archive already unpacked; not unpacked again"})
+        elif is_zip or is_tar:
+            if depth[f] >= MAX_DEPTH:
+                raise ScanAbort(f"archives nested more than {MAX_DEPTH} deep")
+            unpacked.add(archive_digest)
             # Every archive is unpacked, PyTorch zips included, so each member gets its own verdict; a
             # file that is both a ZIP and a tar is unpacked both ways. The outer asset's own members
             # are reported under their plain names.
@@ -593,7 +625,12 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
                     dest.mkdir(parents=True)
                     suffix = "!/" if not (is_zip and is_tar) else f"!{interpretation}/"
                     bases.append((dest.resolve(), rel(f) + suffix))
-                members = safe_extract(f, dest, interpretation)
+                members = safe_extract(f, dest, interpretation, budget)
+                members_total += len(members)
+                if members_total > MAX_MEMBERS:
+                    raise ScanAbort(f"more than {MAX_MEMBERS} extracted members")
+                for member in members:
+                    depth[member] = depth[f] + 1
                 queue.extend(members)
                 results.append({"file": rel(f), "kind": ("pytorch-zip" if ext in PYTORCH_EXT else "archive")
                                 + ("" if not (is_zip and is_tar) else f" ({interpretation})"),
@@ -663,6 +700,8 @@ def scan_asset(asset: pathlib.Path, work: pathlib.Path):
         if unresolved:
             methods.append(f"torch payload not rebuilt as bytes ({', '.join(unresolved)}): unscanned")
             complete = False
+        for payload in payloads:
+            depth.setdefault(payload, depth[f] + 1)
         queue.extend(payloads)
         dangerous = [g for g in globs if g[2] == SafetyLevel.Dangerous.value]
         verdict = "dangerous" if dangerous else ("clean" if complete else "incomplete")
@@ -679,39 +718,29 @@ def safe_text(text: str) -> str:
 
 def host_path(text: str, work: pathlib.Path, asset: pathlib.Path) -> str | None:
     """Name the host-specific location a report would leak, if any: the scan's work or temp directory,
-    the home or current directory, the asset's directory, or any absolute drive path. Relative member
+    the home or current directory, the asset's directory, the Python installation, or an absolute
+    drive path that exists on this host. Relative member
     paths such as models/home/... or AppData/... belong to the asset and are allowed."""
     places = {"work directory": work, "temp directory": pathlib.Path(tempfile.gettempdir()),
               "home directory": pathlib.Path.home(), "current directory": pathlib.Path.cwd(),
-              "asset directory": asset.absolute().parent}
+              "asset directory": asset.absolute().parent, "python installation": pathlib.Path(sys.prefix),
+              "python base installation": pathlib.Path(sys.base_prefix)}
     for label, place in places.items():
         for form in {str(place), place.as_posix()}:
             if len(form) > 1 and re.search(r"(?<![\w.\-/\\])" + re.escape(form), text):
                 return label
-    if re.search(r"(?<![\w.\-/\\])[A-Za-z]:[\\/]", text):
-        return "absolute drive path"
+    # a drive path counts only if it names a real location on this host (drive and first directory),
+    # so a member name such as "notes C:/x.pkl" is not taken for a leak
+    for m in re.finditer(r"(?<![\w.\-/\\])([A-Za-z]:[\\/][^\s'\"<>|]*)", text):
+        parts = pathlib.Path(m.group(1)).parts[:2]
+        if len(parts) == 2 and pathlib.Path(*parts).exists():
+            return "absolute drive path"
     return None
 
 
-def main(argv=None) -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("asset", type=pathlib.Path)
-    ap.add_argument("--report", type=pathlib.Path, required=True)
-    args = ap.parse_args(argv)
-    work = pathlib.Path(tempfile.mkdtemp(prefix="ser13-"))
-    digest = "unreadable"
-    try:
-        try:
-            digest = sha256(args.asset)  # inside the protected path: an unreadable asset is status 3
-            results = scan_asset(args.asset, work)
-            aborted = None
-        except ScanAbort as exc:
-            results, aborted = [], str(exc)
-        except Exception as exc:  # anything unexpected means the asset was not scanned
-            results, aborted = [], f"unexpected {type(exc).__name__}: {exc}"
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-    lines = [f"asset={args.asset.name}", f"sha256={digest}",
+def build_report(asset: pathlib.Path, work: pathlib.Path, digest: str, results: list, aborted: str | None):
+    """The report text and exit status for the scan results."""
+    lines = [f"asset={asset.name}", f"sha256={digest}",
              f"tools: picklescan {version('picklescan')}, joblib {version('joblib')}, "
              f"numpy {version('numpy')}, python {sys.version.split()[0]}"]
     head = len(lines)
@@ -737,22 +766,55 @@ def main(argv=None) -> int:
     summary = (f"summary: {scanned} pickle files; clean={verdicts['clean']} "
                f"dangerous={verdicts['dangerous']} incomplete={verdicts['incomplete']}")
     text = safe_text("\n".join(lines + [summary, f"scan_status={status}"]) + "\n")
-    leak = host_path(text, work, args.asset)
+    leak = host_path(text, work, asset)
     if leak:  # refused through the status-3 path; the offending lines are not written
         status = 3
         text = safe_text("\n".join(lines[:head] + [f"ABORTED: report would name a host path ({leak})", summary,
                                                    f"scan_status={status}"]) + "\n")
+    return text, status
+
+
+def fallback_report(asset: pathlib.Path, digest: str, why: str) -> str:
+    """A minimal status-3 report built from plain strings only, for when the full report fails."""
+    text = "\n".join([f"asset={getattr(asset, 'name', '?')}", f"sha256={digest}", f"ABORTED: {why}",
+                      "summary: 0 pickle files; clean=0 dangerous=0 incomplete=0", "scan_status=3"]) + "\n"
+    return text.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("asset", type=pathlib.Path)
+    ap.add_argument("--report", type=pathlib.Path, required=True)
+    args = ap.parse_args(argv)
+    work = pathlib.Path(tempfile.mkdtemp(prefix="ser13-"))
+    digest = "unreadable"
+    try:
+        try:
+            digest = sha256(args.asset)  # inside the protected path: an unreadable asset is status 3
+            results = scan_asset(args.asset, work)
+            aborted = None
+        except ScanAbort as exc:
+            results, aborted = [], str(exc)
+        except Exception as exc:  # anything unexpected means the asset was not scanned
+            results, aborted = [], f"unexpected {type(exc).__name__}: {exc}"
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    try:
+        text, status = build_report(args.asset, work, digest, results, aborted)
+    except Exception as exc:  # the report could not be built: status 3, never a crash
+        status, text = 3, fallback_report(args.asset, digest, f"report could not be built ({type(exc).__name__})")
     try:
         args.report.write_bytes(text.encode("utf-8"))
     except Exception as exc:  # the report could not be written: status 3, never a crash
-        status = 3
-        text = safe_text("\n".join(lines[:head] + [f"ABORTED: report could not be written ({type(exc).__name__})",
-                                                   summary, f"scan_status={status}"]) + "\n")
+        status, text = 3, fallback_report(args.asset, digest, f"report could not be written ({type(exc).__name__})")
         try:
             args.report.write_bytes(text.encode("utf-8"))
         except Exception:
             pass
-    print(text.splitlines()[-2], text.splitlines()[-1])
+    try:
+        print(text.splitlines()[-2], text.splitlines()[-1])
+    except Exception:
+        pass
     return status
 
 

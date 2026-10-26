@@ -5,7 +5,9 @@ import collections
 import gzip
 import io
 import os
+import pathlib
 import pickle
+import sys
 import zipfile
 
 import joblib
@@ -659,7 +661,8 @@ def test_a_report_that_would_name_a_host_path_is_refused_with_status_3(tmp_path,
 
 
 def test_host_path_finds_drive_paths_but_not_relative_components(tmp_path):
-    assert scan.host_path("x C:\\data\\m.pkl", tmp_path, tmp_path / "a.zip") == "absolute drive path"
+    # final review H4: a drive path counts only when it names a real location on this host
+    assert scan.host_path("x C:\\no-such-dir-ser13\\m.pkl", tmp_path, tmp_path / "a.zip") is None
     assert scan.host_path("-- models/home/AppData/model.pkl [pickle] CLEAN", tmp_path, tmp_path / "a.zip") is None
 
 
@@ -950,3 +953,83 @@ def test_nested_reader_patch_is_restored_after_the_scan(tmp_path):
     before = jnp.Unpickler
     run(tmp_path, make_zip(tmp_path / "a.zip", {"model.joblib": _joblib_object_array(tmp_path, b"\x80\x05\x82*.")}))
     assert jnp.Unpickler is before
+
+
+# --- Final internal review: report build, archive bounds, extraction budget, drive-path check ---------------
+
+@pytest.mark.parametrize("target", ["version", "host_path", "safe_text"])
+def test_failure_while_building_the_report_is_status_3(tmp_path, monkeypatch, target):
+    # H3: report assembly ran outside any protection
+    def boom(*a, **k):
+        raise RuntimeError("forced")
+    monkeypatch.setattr(scan, target, boom)
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"m.pkl": CLEAN}))
+    assert status == 3, text
+    assert "ABORTED: report could not be built (RuntimeError)" in text and "scan_status=3" in text
+
+
+def _nested_zips(levels: int) -> bytes:
+    data = _zip_bytes({"m.pkl": CLEAN})
+    for i in range(levels):
+        data = _zip_bytes({f"level{i}.zip": data})
+    return data
+
+
+def test_archives_nested_deeper_than_the_limit_are_status_3(tmp_path):
+    # H1: no nesting bound
+    asset = tmp_path / "a.zip"
+    asset.write_bytes(_nested_zips(scan.MAX_DEPTH + 2))
+    status, text = run(tmp_path, asset)
+    assert status == 3, text
+    assert f"archives nested more than {scan.MAX_DEPTH} deep" in text
+
+
+def test_archives_nested_within_the_limit_are_scanned(tmp_path):
+    asset = tmp_path / "a.zip"
+    asset.write_bytes(_nested_zips(5))
+    status, text = run(tmp_path, asset)
+    assert status == 0, text
+
+
+def test_byte_identical_archive_is_not_unpacked_again(tmp_path):
+    # H1: a byte-identical nested archive (the shape of a zip quine) is not re-queued
+    inner = _zip_bytes({"m.pkl": CLEAN})
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"one.zip": inner, "two.zip": inner}))
+    assert status == 0, text
+    assert text.count("not unpacked again") == 1
+
+
+def test_more_members_than_the_limit_is_status_3(tmp_path, monkeypatch):
+    monkeypatch.setattr(scan, "MAX_MEMBERS", 3)
+    asset = make_zip(tmp_path / "a.zip", {f"f{i}.json": b"{}" for i in range(5)})
+    status, text = run(tmp_path, asset)
+    assert status == 3, text
+    assert "more than 3 extracted members" in text
+
+
+def test_extraction_over_the_byte_budget_is_status_3(tmp_path, monkeypatch):
+    # H2: a small gzip tar whose member declares more than the budget; the cap is lowered for the test
+    import tarfile
+    monkeypatch.setattr(scan, "MAX_EXTRACT_BYTES", 4096)
+    tgz = tmp_path / "big.tgz"
+    with tarfile.open(tgz, "w:gz") as tf:
+        info = tarfile.TarInfo("zeros.bin")
+        info.size = 1 << 20
+        tf.addfile(info, io.BytesIO(bytes(info.size)))
+    assert tgz.stat().st_size < 4096
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"bundle.tgz": tgz.read_bytes()}))
+    assert status == 3, text
+    assert "byte extraction limit" in text
+
+
+def test_member_name_with_a_drive_like_part_is_not_a_host_path(tmp_path):
+    # H4: " C:/" inside a member name is not a leaked host path unless it names a real location
+    assert scan.host_path("-- data/notes C:/no-such-dir-ser13/m.pkl [pickle] CLEAN", tmp_path, tmp_path / "a.zip") is None
+    assert scan.host_path("ABORTED: x " + str(pathlib.Path(sys.executable).resolve()), tmp_path,
+                          tmp_path / "a.zip") is not None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="':' is not allowed in Windows file names")
+def test_drive_like_member_name_is_reported(tmp_path):
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"notes C:/m.pkl": CLEAN}))
+    assert status == 0, text
