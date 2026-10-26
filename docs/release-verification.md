@@ -360,6 +360,76 @@ with no `DeprecationWarning`. The Section 11 activity (`n_estimators` 4 → 1) p
 | `tabpfn_classifier_colab_f4ff797_colab-cli-t4_activity_run_summary.json` | `321531b1827cdc3db505e305d7ac96fc6fad8f60a5343732505b94d538468487` | unchanged (no local path) |
 | `tabpfn_classifier_colab_f4ff797_colab-cli-t4_activity_run_copy.ipynb` | `237dd424536a6a75db00172ee07e667b8278ab56897342070ce4de145f8e7ac4` | unchanged (no local path) |
 
+### Serialization scan of the pinned sample artifact (2026-10-23, retroactive)
+
+ARTIFACT_SPEC 2.0 (ml-worker#90): SER9 (b) for `model.ckpt`, a byte copy of the upstream code-capable checkpoint kept so the bundle can be checked against the pinned upstream identity; SER9 (a) for `model.tabpfn_fit`, TabPFN's own fitted-state format, which has no faithful non-code-executing equivalent. This is the v1 sample, kept as history: its successor, `sample-artifact-synthetic-v2`, is a bundle-format v2 export with `model.safetensors` and no `model.ckpt`, scanned in the next subsection. Both files need a recorded trust note (SER6: "Artifact contract and trust boundary" in [`tutorials/README.md`](../tutorials/README.md)) and a scan with an acceptable outcome (SER13). SER13 asks for the scan **before** publication; this asset was published on
+2026-10-22, before 2.0 existed, so this is a **retroactive** scan of the published bytes, not the pre-publication control. The
+next sample artifact is to be scanned before upload and published only at the digest that passed.
+
+The release asset `sample-artifact-synthetic-v1/tabpfn_classifier_artifact.zip` was downloaded on 2026-10-23; its SHA-256 (`8fe248e2f9841c452316d07ee3e88e5fcde89ec458ff630954028b1c22df1054`) matches the pinned value. `scan.py`
+(picklescan 1.0.5, joblib 1.6.0, numpy 2.5.4, Python 3.13) extracted it with member-path checks, reached every nested archive,
+and judged each pickle file on its own: **dangerous** if any global is dangerous, **incomplete** if no recorded method read the
+whole file, otherwise **clean**. Content decides what is a pickle, not the file name, and every archive (PyTorch zips
+included) is unpacked so each member gets its own verdict.
+
+The two joblib files interleave raw numpy bytes with pickle instructions, so picklescan cannot read them to the end. For those, `scan.py` runs a **restricted load**: joblib's own reader with `find_class` replaced, so only numpy's array and scalar rebuilders, `numpy.dtype` and joblib's `NumpyArrayWrapper` are real and run; every other global is an inert stub, recorded, and classified with picklescan's own tables. Payloads of `torch.storage._load_from_bytes` are saved as files and scanned like any other file, never loaded.
+
+| File | Kind | Verdict |
+|---|---|---|
+| `tabpfn_classifier_artifact.zip` | archive | extracted |
+| `model.tabpfn_fit` | archive | extracted |
+| `model.ckpt` | pytorch-zip | extracted |
+| `model.tabpfn_fit!/fitted_attrs.joblib` | joblib | clean |
+| `model.tabpfn_fit!/executor_state.joblib` | joblib | clean |
+| `model.ckpt!/archive/data.pkl` | pickle | clean |
+
+- **Result:** 3 pickle files; clean=3 dangerous=0 incomplete=0; `scan_status=0`. Dangerous globals: none.
+- **Globals (distinct, all files):** 43, by top-level package: tabpfn (28), numpy (5), sklearn (5), torch (2), builtins (1), collections (1), joblib (1). The per-file lists with picklescan's
+  classification are in the report.
+- **Evidence:** `docs/execution-evidence/2026-10-23/ser13-sample-artifact-scan/` holds `scan-report.txt` exactly as `scan.py`
+  wrote it (it records only paths inside the asset), `scan.py`, and `test_scan.py`, its regression tests (dangerous globals
+  behind joblib buffers or beside joblib files, protocol-0 pickles under other names, pickle/zip polyglots, every PyTorch zip
+  member, object-dtype .npy files in every dtype spelling, object records after numeric ones in a multi-record .npy
+  (also inside an .npz, and at both resume points after a STOP inside a frame), extension-registry opcodes (also in
+  streams that fail to load), compressed prefixes in front of an archive, streams at both continuations of a frame
+  (also with different memos), protocol-2 compatibility names, pickles after a record without NumPy magic, non-UTF-8
+  member names, extension codes inside joblib object arrays, archive nesting, member-count and extracted-size
+  limits, failures while building the report, drive-like member names, torch payloads in complete pickles or under any qualified split of the loader name, object
+  arrays and protocol-2 bytes, memo-aliased globals (also across consecutive streams), dangerous streams after a clean
+  one or inside one protocol-4 frame, a pickle in front of the asset itself, zip/tar
+  polyglots, compressed (including zlib of any window size or with delayed output, and LZMA-alone) and truncated
+  pickles, streams that share a memo or sit behind a STOP inside a frame, streams after a legacy checkpoint's five
+  pickles and tails that are not its raw storages, nested archives that try to overwrite queued members, duplicate,
+  escaping and malformed members, relative member paths such as `home/` in the report, and unreadable assets).
+  `scan.py` exits 0 clean, 1 dangerous, 2 incomplete, 3 could not scan.
+- **Scope:** the threat model at the top of `scan.py` (frozen 2026-10-24) says what the scan covers. Data a loader
+  decodes with no format marker, code that is not pickle, and harm through callables picklescan rates safe or
+  suspicious are out of scope; review findings inside the scope are fixed, findings outside it are recorded.
+
+### Serialization scan of the v2 sample artifact (2026-10-25)
+
+`sample-artifact-synthetic-v2` is the default pinned sample since the bundle-format v2 change: `model.tabpfn_fit` +
+`model.safetensors` + `artifact_manifest.json`, with no `model.ckpt`, so the only code-capable state is TabPFN's fitted
+state under ARTIFACT_SPEC 2.0 SER9 (a), with the SER6 trust note in [`tutorials/README.md`](../tutorials/README.md).
+The weights are `safetensors` (SER7). This asset was published on 2026-10-24, so this scan is also retroactive.
+
+The release asset `sample-artifact-synthetic-v2/tabpfn_classifier_artifact.zip` was downloaded on 2026-10-25; its SHA-256 (`8828df98a2db8047bc2d52313a5a173bfa499d8b780619899def268dee31b41c`) matches
+the value pinned as `SAMPLE_ARTIFACT_SHA256`. It was scanned with the same `scan.py` as above.
+
+| File | Kind | Verdict |
+|---|---|---|
+| `tabpfn_classifier_artifact.zip` | archive | extracted |
+| `model.tabpfn_fit` | archive | extracted |
+| `model.tabpfn_fit!/fitted_attrs.joblib` | joblib | clean |
+| `model.tabpfn_fit!/executor_state.joblib` | joblib | clean |
+
+- **Result:** 2 pickle files; clean=2 dangerous=0 incomplete=0; `scan_status=0`. Dangerous globals: none.
+  `model.safetensors` is not pickle content, so it gets no verdict.
+- **Globals (distinct, all files):** 40, by top-level package: tabpfn (28), numpy (5), sklearn (5), builtins (1), joblib (1).
+- **Evidence:** `docs/execution-evidence/2026-10-23/ser13-sample-artifact-scan/scan-report-v2.txt`, exactly as `scan.py`
+  wrote it.
+
+
 ### Local lock-only drives (not clean-runtime evidence)
 
 Code cells driven in order by a plain-CPython stand-in kernel on Linux x86_64 (WSL2), CPU only (`CUDA_VISIBLE_DEVICES=-1`), inside each notebook's own isolated hash-locked uv environment (CPython 3.12.12; torch 2.11.0, tabpfn 8.1.0, numpy 2.5.3, pandas 2.3.2, scikit-learn 1.9.0; 63 locked packages), default form values. The checkpoint was copied in from a local checkout and digest-verified (`d0d865d5…`), so the Hub download was not exercised; no notebook kernel, no Colab.
