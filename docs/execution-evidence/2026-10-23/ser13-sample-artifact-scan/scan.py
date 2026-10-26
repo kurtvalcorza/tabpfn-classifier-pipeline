@@ -40,7 +40,8 @@ own, and a path that reaches no valid record makes the file incomplete. Bytes wi
 after a record are a pickle, as numpy.load(allow_pickle=True) falls back to pickle.load for them.
 Extension-registry opcodes (EXT1/2/4) make a file pickle content and incomplete, also in a stream
 that fails to load if it began with a PROTO opcode: the global they name is resolved only by the
-loading process's copyreg registry. Payloads of torch.storage._load_from_bytes are captured as files
+loading process's copyreg registry; joblib's nested reader for object arrays records them the same
+way. Payloads of torch.storage._load_from_bytes are captured as files
 and scanned like any other file, never loaded; a payload that cannot be rebuilt as bytes makes its
 file incomplete.
 gzip, bzip2, xz, LZMA-alone, zstd, lz4, zlib (any window size, recognised by its header and a bounded
@@ -63,7 +64,11 @@ are recorded as out of scope):
     constructor with side effects): picklescan's tables are the policy, not a judgement made here;
   - an extension-registry opcode in bytes that have no PROTO opcode and do not load to a STOP (a known
     gap, ruled 2026-10-26): flagging those would turn 4 of the 6 published sample assets incomplete
-    through 15 raw tensor members whose bytes happen to begin with those opcodes.
+    through 15 raw tensor members whose bytes happen to begin with those opcodes;
+  - a callable already registered in the scanning process's copyreg extension registry: a fresh
+    scanner's registry is empty, an unregistered extension code raises, the forwarded find_class stubs
+    any name a registered code resolves to, and nothing in a scanned file can register one (the
+    environment running the scan is trusted).
   Assumes: the scanned bytes are the bytes that get published (the asset digest is pinned), and the
   environment running the scan is trusted.
 
@@ -528,8 +533,19 @@ def restricted_inventory(data: bytes, nested_dir: pathlib.Path, legacy: bool = F
                 todo.append((nxt, unpickler.memo if shared_memo else {}, count + 1, keys))
         return ok
 
+    class NestedRestricted(pickle._Unpickler):
+        # joblib's NumpyArrayWrapper.read_array unpickles an object array with a fresh Unpickler and
+        # forwards only find_class; this class takes its place, so extension codes are recorded too
+        def get_extension(self, code):
+            pending.append(code)
+            self.append(type(f"Stub[extension {code}]", (Stub,), {}))
+
     # both memo behaviours a standard loader can have; the file is read to the end only if both read it
-    parsed = read(shared_memo=False) & read(shared_memo=True)
+    nested_unpickler, jnp.Unpickler = jnp.Unpickler, NestedRestricted
+    try:
+        parsed = read(shared_memo=False) & read(shared_memo=True)
+    finally:
+        jnp.Unpickler = nested_unpickler
     return parsed, seen, payloads, unresolved, sorted(extensions)
 
 

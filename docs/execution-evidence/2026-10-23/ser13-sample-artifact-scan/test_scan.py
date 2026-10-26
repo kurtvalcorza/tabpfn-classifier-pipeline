@@ -911,3 +911,42 @@ def test_report_that_cannot_be_written_is_status_3(tmp_path):
     target = tmp_path / "report-dir"
     target.mkdir()
     assert scan.main([str(asset), "--report", str(target)]) == 3
+
+
+# --- Codex round 7 on scan.py v13: extension codes inside joblib's nested object-array reader --------------
+
+def _joblib_object_array(tmp_path, nested: bytes | None = None) -> bytes:
+    # a real joblib object array; joblib writes its contents as one protocol-5 pickle, which nested replaces
+    arr = np.empty(1, dtype=object)
+    arr[0] = 7
+    blob = joblib_bytes(arr, tmp_path, "o.joblib")
+    contents = pickle.dumps(arr, protocol=5)
+    pos = blob.find(contents)
+    assert pos != -1
+    return blob if nested is None else blob[:pos] + nested + blob[pos + len(contents):]
+
+
+@pytest.mark.parametrize("nested", [
+    pytest.param(b"\x80\x05\x82*.", id="EXT1"),
+    pytest.param(b"\x80\x05\x83" + (42).to_bytes(2, "little") + b".", id="EXT2"),
+    pytest.param(b"\x80\x05\x84" + (42).to_bytes(4, "little") + b".", id="EXT4"),
+])
+def test_extension_code_in_a_joblib_object_array_is_recorded(tmp_path, nested):
+    # Codex 4372946314: read_array's nested Unpickler forwarded find_class but not get_extension
+    data = _joblib_object_array(tmp_path, nested)
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.joblib": data}))
+    assert status == 2, text
+    assert "model.joblib [joblib] INCOMPLETE" in text and "extension-registry opcode (code 42)" in text
+
+
+def test_clean_joblib_object_array_is_clean(tmp_path):
+    status, text = run(tmp_path, make_zip(tmp_path / "a.zip", {"model.joblib": _joblib_object_array(tmp_path)}))
+    assert status == 0, text
+    assert "extension-registry" not in text
+
+
+def test_nested_reader_patch_is_restored_after_the_scan(tmp_path):
+    import joblib.numpy_pickle as jnp
+    before = jnp.Unpickler
+    run(tmp_path, make_zip(tmp_path / "a.zip", {"model.joblib": _joblib_object_array(tmp_path, b"\x80\x05\x82*.")}))
+    assert jnp.Unpickler is before
