@@ -98,7 +98,7 @@ def _no_colab(monkeypatch):
 
 def _kernel(tmp_path: Path) -> tuple[dict, list]:
     calls: list = []
-    ns = {"ROOT": tmp_path / "run", "Path": Path, "shutil": shutil, "run_stage": lambda stage, **o: calls.append((stage, o))}
+    ns = {"ROOT": tmp_path / "run", "Path": Path, "shutil": shutil, "run_stage": lambda stage, **o: calls.append((stage, o)), "Refused": type("Refused", (Exception,), {})}
     return ns, calls
 
 
@@ -314,7 +314,7 @@ def test_m3_byod_path_field_and_upload_fallback(tmp_path, monkeypatch) -> None:
     monkeypatch.undo()
     with _colab([{}]) as files:
         ns, calls = _kernel(tmp_path)
-        with pytest.raises(RuntimeError, match="cancelled or empty"):
+        with pytest.raises(ns["Refused"], match=r"^\(no file\): the upload was cancelled or empty"):  # DAT20: a refusal, not a RuntimeError
             exec(compile(_set(cell, "USE_BYOD", True), "<s4>", "exec"), ns)
         assert files.calls == 1 and calls == []
     ns, calls = _kernel(tmp_path)
