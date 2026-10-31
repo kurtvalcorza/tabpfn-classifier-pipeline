@@ -1,0 +1,69 @@
+{
+  "repo": "tabpfn-classifier-pipeline",
+  "sha": "d52cc070284c6b963431d119ae8d1deaadf65d76",
+  "notebook": "tutorials/tabpfn_classifier_colab.ipynb",
+  "blob": "fc28690c04f6712c41ba5bb9c1959b69f187de57",
+  "gpu": "T4",
+  "session": "suite-tabpfn-d52cc07-d461",
+  "started_utc": "2026-10-29T17:33:52+00:00",
+  "runner": "Colab CLI `colab exec -f` on a fresh session (not a browser Run all)",
+  "overrides": [
+    {
+      "name": "USE_BYOD",
+      "from": "False",
+      "to": "True"
+    },
+    {
+      "name": "BYOD_PATH",
+      "from": "''",
+      "to": "'/content/sample_data/california_housing_test.csv'"
+    }
+  ],
+  "run_copy_blob": "ce91d6f1665d035eed5612a928607cd83f9513a6",
+  "run_copy_sha256": "bb0320e677913de2630e8b50904f42e3793cba8baa4f1f0d3d23e071b152bf78",
+  "run_copy_note": "refusal run: the run copy is the committed notebook with the listed assignment overrides, cut immediately after the refusal cell and re-serialised (nbformat layout); input_unchanged compares against that copy",
+  "truncated_after_cell": "tabpfn_classifier-14",
+  "refusal_cell_ref": "tabpfn_classifier-14",
+  "refusal_cell_index": 5,
+  "cells_dropped": 29,
+  "code_cells_dropped": 9,
+  "original_sha256": "fbb52bec14fcb19f8ddb9c18b1408c3b075572aeec1650b51b7cfd82bf4d53e8",
+  "status": "[suite-tabpfn-d52cc07-d461] gpu-t4-s-usw1b1-1lhfom36rutt6 | Hardware: T4 | Shape: Standard | Variant: GPU | Status: IDLE",
+  "exec_exit_code": 0,
+  "stopped": true,
+  "stop_verified": true,
+  "wall_s": 107.6,
+  "input_unchanged": true,
+  "executed_file": "tabpfn_classifier_colab_d52cc07_colab-cli-t4_output.ipynb",
+  "log_cells": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "log_total": 5,
+  "code_cells": 5,
+  "executed_cells": 5,
+  "errors": [
+    {
+      "cell": "tabpfn_classifier-14",
+      "ename": "Refused",
+      "evalue": "california_housing_test.csv: [TARGET_MISSING] target column 'target' not present (observed: ['longitude', 'latitude', 'housing_median_age', 'total_rooms', 'total_bedrooms', 'population', 'households', 'median_income', 'median_house_value']). Set TARGET_COLUMN to the name of your label column. Fix th"
+    }
+  ],
+  "execution_counts": [],
+  "sequential": null,
+  "executed_sha256": "78df6dfef9c613681745c329c81ba48a17d583717475df913fdb307b30869dd3",
+  "log_sequential_complete": true,
+  "mode": "expect_refusal",
+  "refusal_line": "Refused: california_housing_test.csv: [TARGET_MISSING] target column 'target' not present (observed: ['longitude', 'latitude', 'housing_median_age', 'total_rooms', 'total_bedrooms', 'population', 'households', 'median_income', 'median_house_value']). Set TARGET_COLUMN to the name of your label column. Fix the file (or the Section 4 fields) and run the Section 4 cell again.",
+  "halting_cell_index": 5,
+  "halting_cell_id": "tabpfn_classifier-14",
+  "error_cells": [
+    5
+  ],
+  "refusal_fail_reasons": [],
+  "refusal_ok": true,
+  "verdict": "PASS"
+}
