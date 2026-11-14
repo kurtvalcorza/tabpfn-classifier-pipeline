@@ -561,6 +561,12 @@ SHA-256s, and the input dataset SHA-256. Paired with the container image digest 
   [`MODEL_CARD.md`](MODEL_CARD.md), [`TABULAR_CLASSIFICATION_DATASET_SPEC.md`](TABULAR_CLASSIFICATION_DATASET_SPEC.md),
   [`DEPLOYMENT.md`](DEPLOYMENT.md), [`PHASE2_ACCEPTANCE_REPORT.md`](PHASE2_ACCEPTANCE_REPORT.md).
 
+## Licence
+
+This repository's own contents (contract documents, JSON schemas, `serving/`, `examples/`, notebooks and tests) are licensed under the [Apache License 2.0](LICENSE).
+
+That licence does **not** cover the TabPFN model weights. The weights are Prior Labs' and carry their own terms: the default **v3** weights are under the TABPFN-3 Non-Commercial License (see [NOTICE](NOTICE) and the licence file under `weights/`), and the v2.5 / v2.6 weights are also non-commercial. Only the v2 weights carry Prior Labs' Apache-derived licence. A served pipeline is bound by the weight licence and by the licence of its training data; see [The model: TabPFN](#the-model-tabpfn) and [Data licence governs the served model](#data-licence-governs-the-served-model).
+
 ## AI Assistance Disclosure
 
 This repository’s code and accompanying documentation were developed with generative AI assistance for code development and technical writing under maintainer direction. The maintainer remains responsible for reviewing the implementation, validating results, and making release decisions. AI assistance does not constitute independent verification, provider endorsement, or release approval.
